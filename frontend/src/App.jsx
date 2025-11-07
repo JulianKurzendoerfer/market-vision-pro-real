@@ -1,95 +1,49 @@
-import { useState } from "react";
+import {useEffect,useState} from "react"
+const API=import.meta.env.VITE_API_BASE||""
 
-const API = import.meta.env.VITE_API_BASE; // z.B. https://market-vision-pro-real.onrender.com
+function Card({title,children}){return(<div style={{border:"1px solid #ddd",borderRadius:8,padding:18,minHeight:110,display:"flex",flexDirection:"column",justifyContent:"space-between"}}><div style={{fontSize:14,color:"#666"}}>{title}</div><div style={{fontSize:28}}>{children}</div></div>)}
 
-function Card({ title, children }) {
-  return (
-    <div style={{border:"1px solid #ddd", borderRadius:10, padding:18, minHeight:110}}>
-      <div style={{fontSize:13, color:"#666"}}>{title}</div>
-      <div style={{fontSize:28, marginTop:10}}>{children}</div>
-    </div>
-  );
-}
+export default function App(){
+  const [q,setQ]=useState("Apple")
+  const [code,setCode]=useState("")
+  const [price,setPrice]=useState(null)
+  const [k,setK]=useState(null)
+  const [d,setD]=useState(null)
+  const [rsi,setRsi]=useState(null)
+  const [m1,setM1]=useState(null)
+  const [m2,setM2]=useState(null)
+  const [e20,setE20]=useState(null)
+  const [e50,setE50]=useState(null)
 
-export default function App() {
-  const [q, setQ] = useState("Apple");
-  const [symbol, setSymbol] = useState(null);
-  const [status, setStatus] = useState("ok");
-  const [price, setPrice] = useState(null);
-  const [rsi, setRsi] = useState(null);
-  const [stoch, setStoch] = useState({ k: null, d: null });
-  const [macd, setMacd] = useState({ line: null, signal: null });
-  const [ema, setEma] = useState({ e20: null, e50: null });
-
-  async function load() {
-    try {
-      setStatus("load");
-
-      // 1) Symbol auflösen (bevorzugt US)
-      const resResolve = await fetch(`${API}/v1/resolve?q=${encodeURIComponent(q)}&prefer=US`);
-      const candidates = await resResolve.json();
-      const sy = (Array.isArray(candidates) && candidates[0]?.code) ? candidates[0].code : "AAPL";
-      setSymbol(sy);
-
-      // 2) Daten holen (OHLCV + Indikatoren)
-      const [ohlcv, ind] = await Promise.all([
-        fetch(`${API}/v1/ohlcv?symbol=${sy}`).then(r => r.json()),
-        fetch(`${API}/v1/indicators?symbol=${sy}`).then(r => r.json()),
-      ]);
-
-      // 3) Felder mappen
-      const last = Array.isArray(ohlcv) && ohlcv.length ? ohlcv[ohlcv.length - 1] : null;
-      setPrice(last?.close ?? null);
-
-      setRsi(ind?.rsi ?? null);
-      setStoch({ k: ind?.stochK ?? null, d: ind?.stochD ?? null });
-      setMacd({ line: ind?.macdLine ?? null, signal: ind?.macdSignal ?? null });
-      setEma({ e20: ind?.ema20 ?? null, e50: ind?.ema50 ?? null });
-
-      setStatus("ok");
-    } catch (e) {
-      console.error(e);
-      setStatus("fail");
-    }
+  async function load(symbol){
+    const r=await fetch(`${API}/v1/indicators?symbol=${encodeURIComponent(symbol)}`)
+    const j=await r.json()
+    setPrice(j.price??null); setRsi(j.rsi??null); setK(j.stoch_k??null); setD(j.stoch_d??null); setM1(j.macd_line??null); setM2(j.macd_signal??null); setE20(j.ema20??null); setE50(j.ema50??null)
   }
+  async function resolveAndLoad(){
+    const r=await fetch(`${API}/v1/resolve?q=${encodeURIComponent(q)}&prefer=US`)
+    const j=await r.json()
+    const c=(j&&j.length)?j[0].code:q
+    setCode(c); await load(c)
+  }
+  useEffect(()=>{resolveAndLoad()},[])
 
   return (
-    <div style={{maxWidth:1100, margin:"40px auto", fontFamily:"system-ui"}}>
-      <h2>Market Vision Pro <span style={{fontSize:14, marginLeft:8, color:"#666"}}>{status}</span></h2>
-
-      <div style={{display:"flex", gap:8, alignItems:"center"}}>
-        <input
-          style={{padding:"6px 10px"}}
-          value={q}
-          onChange={(e)=>setQ(e.target.value)}
-          placeholder="Apple"
-        />
-        <button onClick={load}>ok</button>
-        <button onClick={load}>load</button>
-        {symbol && <span style={{marginLeft:12, color:"#666"}}>{symbol}</span>}
+    <div style={{maxWidth:1100,margin:"36px auto",fontFamily:"system-ui"}}>
+      <h2>Market Vision Pro <span style={{fontSize:14,marginLeft:8,color:"#666"}}>ok</span></h2>
+      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:16}}>
+        <input value={q} onChange={e=>setQ(e.target.value)} style={{padding:"6px 8px"}} />
+        <button onClick={resolveAndLoad}>ok</button>
+        <button onClick={()=>code&&load(code)}>load</button>
+        <span style={{marginLeft:12}}>{code}</span>
       </div>
-
-      <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:18, marginTop:18}}>
-        <Card title="Preise">
-          {price!=null ? `${price.toFixed(2)} USD` : "- USD"}
-        </Card>
-
-        <Card title="Stoch K/D">
-          {(stoch.k!=null && stoch.d!=null) ? `${stoch.k.toFixed(1)} / ${stoch.d.toFixed(1)}` : "- / -"}
-        </Card>
-
-        <Card title="RSI">
-          {rsi!=null ? rsi.toFixed(1) : "-"}
-        </Card>
-
-        <Card title="MACD">
-          {(macd.line!=null && macd.signal!=null) ? `${macd.line.toFixed(2)} / ${macd.signal.toFixed(2)}` : "- / -"}
-        </Card>
-
-        <Card title="EMA20/50">
-          {(ema.e20!=null && ema.e50!=null) ? `${ema.e20.toFixed(2)} / ${ema.e50.toFixed(2)}` : "- / -"}
-        </Card>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18}}>
+        <Card title="Preise">{price==null? "- USD": `${price.toFixed(2)} USD`}</Card>
+        <Card title="Stoch K/D">{(k==null||d==null)?"- / -":`${k.toFixed(1)} / ${d.toFixed(1)}`}</Card>
+        <Card title="RSI">{rsi==null?"-":rsi.toFixed(1)}</Card>
+        <Card title="MACD">{(m1==null||m2==null)?"- / -":`${m1.toFixed(2)} / ${m2.toFixed(2)}`}</Card>
+        <Card title="EMA20/50">{(e20==null||e50==null)?"- / -":`${e20.toFixed(2)} / ${e50.toFixed(2)}`}</Card>
       </div>
     </div>
-  );
+  )
 }
