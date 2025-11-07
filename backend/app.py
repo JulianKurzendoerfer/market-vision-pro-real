@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 APP=FastAPI()
+app=APP
 orig=os.environ.get("ALLOWED_ORIGINS","*").split(",")
 APP.add_middleware(CORSMiddleware,allow_origins=[o.strip() for o in orig if o.strip()],allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 
