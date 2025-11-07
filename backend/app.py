@@ -1,72 +1,43 @@
-import os,json,math
-from datetime import datetime,timezone
-import requests,pandas as pd,numpy as np
-from fastapi import FastAPI,HTTPException,Query
+import os
+from datetime import datetime, timezone
+import requests, pandas as pd, numpy as np, yfinance as yf
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-EOD=os.environ.get("EODHD_API_KEY","")
-ALLOW=os.environ.get("ALLOWED_ORIGINS","*").split(",")
 app=FastAPI()
-app.add_middleware(CORSMiddleware,allow_origins=[o.strip() for o in ALLOW if o.strip()],allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
-
-def jget(path,params=None,timeout=8):
-    if not EOD: raise HTTPException(500,"missing_token")
-    p=dict(params or {}); p["api_token"]=EOD; p["fmt"]="json"
-    r=requests.get("https://eodhd.com"+path,params=p,timeout=timeout)
-    if r.status_code!=200: raise HTTPException(502,"upstream_http_error")
-    try: return r.json()
-    except: raise HTTPException(502,"upstream_json_error")
+orig=os.environ.get("ALLOWED_ORIGINS","*").split(",")
+app.add_middleware(CORSMiddleware,allow_origins=[o.strip() for o in orig if o.strip()],allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 
 @app.get("/health")
-def health(): return {"ok":True,"asof":datetime.now(timezone.utc).isoformat()}
+def health():
+    return {"ok":True,"asof":datetime.now(timezone.utc).isoformat()}
+
+EOD=os.environ.get("EODHD_API_KEY","")
 
 @app.get("/v1/resolve")
-def resolve(q:str=Query(...,min_length=1),limit:int=15,prefer:str="US"):
-    data=jget(f"/api/search/{q}",{"limit":limit,"type":"stock"})
+def resolve(q: str, prefer: str="US"):
+    if not EOD: raise HTTPException(500,"no_api_key")
+    u=f"https://eodhd.com/api/search-ticker/?search={q}&api_token={EOD}&fmt=json"
+    r=requests.get(u,timeout=15); r.raise_for_status()
+    data=r.json()
+    for d in data:
+        d["score"]=1
+        if d.get("exchangeShortName")==prefer: d["score"]=2
+        if d.get("Code","").upper()==q.upper(): d["score"]=3
+    data=sorted(data,key=lambda d:d.get("score",0),reverse=True)[:10]
+    return data
+
+def to_rows(df):
     out=[]
-    for x in data:
-        code=x.get("Code",""); exch=x.get("Exchange",""); name=x.get("Name","")
-        score=2 if prefer.upper() in exch.upper() else 1
-        out.append({"code":code,"exchange":exch,"name":name,"score":score})
-    out.sort(key=lambda z:(-z["score"],z["code"]))
+    for t,o,h,l,c,v in zip(df.index,df["Open"],df["High"],df["Low"],df["Close"],df["Volume"]):
+        out.append({"t":datetime.fromtimestamp(int(t.timestamp()),tz=timezone.utc).isoformat(),"o":float(o),"h":float(h),"l":float(l),"c":float(c),"v":float(v)})
     return out
 
-def intraday(symbol,interval):
-    raw=jget(f"/api/intraday/{symbol}",{"interval":interval,"sort":"asc","limit":5000})
-    if not isinstance(raw,list) or not raw: raise HTTPException(404,"no_bars")
-    rows=[]
-    for r in raw:
-        t=r.get("timestamp") or r.get("datetime") or r.get("date")
-        if isinstance(t,str):
-            try: ts=int(datetime.fromisoformat(t.replace("Z","+00:00")).timestamp())
-            except: continue
-        else: ts=int(t)
-        rows.append({"t":ts,"o":float(r["open"]),"h":float(r["high"]),"l":float(r["low"]),"c":float(r["close"]),"v":float(r.get("volume",0.0))})
-    return rows
-
 @app.get("/v1/ohlcv")
-def ohlcv(symbol:str,interval:str="60m"):
-    bars=intraday(symbol,interval)
-    return {"symbol":symbol,"interval":interval,"bars":bars}
-
-def ema(x,span): return x.ewm(span=span,adjust=False).mean()
-def rsi(close,period=14):
-    d=close.diff().fillna(0); up=d.clip(lower=0); dn=(-d).clip(lower=0)
-    rs=ema(up,period)/ema(dn,period); return 100-(100/(1+rs))
-def stoch(h,l,c,k=14,d=3,s=3):
-    ll=l.rolling(k).min(); hh=h.rolling(k).max()
-    kline=100*(c-ll)/(hh-ll).replace(0,np.nan); kline=kline.rolling(s).mean(); dline=kline.rolling(d).mean()
-    return kline,dline
-def macd(c,fa=12,sl=26,si=9):
-    m=ema(c,fa)-ema(c,sl); s=ema(m,si); h=m-s; return m,s,h
-def last(v):
-    v=v.dropna()
-    return None if v.empty else float(v.iloc[-1])
-
-@app.get("/v1/indicators")
-def indicators(symbol:str,interval:str="60m"):
-    bars=intraday(symbol,interval)
-    df=pd.DataFrame(bars); df["dt"]=pd.to_datetime(df["t"],unit="s",utc=True); df.set_index("dt",inplace=True)
-    c=df["c"]; h=df["h"]; l=df["l"]
-    e20=ema(c,20); e50=ema(c,50); r=rsi(c,14); k,d=stoch(h,l,c,14,3,3); m,s,hh=macd(c,12,26,9)
-    return {"symbol":symbol,"interval":interval,"ema20":last(e20),"ema50":last(e50),"rsi14":last(r),"stochK":last(k),"stochD":last(d),"macd":last(m),"macdSignal":last(s),"macdHist":last(hh)}
+def ohlcv(symbol: str):
+    try:
+        df=yf.Ticker(symbol).history(period="1y",interval="1d",auto_adjust=False)
+        if df.empty: raise HTTPException(404,"no_data")
+        return {"rows":to_rows(df)}
+    except Exception:
+        raise HTTPException(502,"upstream_unavailable")
