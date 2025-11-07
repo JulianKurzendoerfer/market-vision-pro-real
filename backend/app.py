@@ -1,43 +1,28 @@
-import os
+import os, json
 from datetime import datetime, timezone
-import requests, pandas as pd, numpy as np, yfinance as yf
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
+import requests
 app=FastAPI()
 orig=os.environ.get("ALLOWED_ORIGINS","*").split(",")
 app.add_middleware(CORSMiddleware,allow_origins=[o.strip() for o in orig if o.strip()],allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
-
 @app.get("/health")
-def health():
-    return {"ok":True,"asof":datetime.now(timezone.utc).isoformat()}
-
-EOD=os.environ.get("EODHD_API_KEY","")
-
+def health(): return {"ok":True,"asof":datetime.now(timezone.utc).isoformat()}
+def eod_search(q,t): 
+    u=f"https://eodhd.com/api/search/{q}?api_token={t}&fmt=json"
+    r=requests.get(u,timeout=12); r.raise_for_status(); return r.json()
 @app.get("/v1/resolve")
-def resolve(q: str, prefer: str="US"):
-    if not EOD: raise HTTPException(500,"no_api_key")
-    u=f"https://eodhd.com/api/search-ticker/?search={q}&api_token={EOD}&fmt=json"
-    r=requests.get(u,timeout=15); r.raise_for_status()
-    data=r.json()
-    for d in data:
-        d["score"]=1
-        if d.get("exchangeShortName")==prefer: d["score"]=2
-        if d.get("Code","").upper()==q.upper(): d["score"]=3
-    data=sorted(data,key=lambda d:d.get("score",0),reverse=True)[:10]
-    return data
-
-def to_rows(df):
-    out=[]
-    for t,o,h,l,c,v in zip(df.index,df["Open"],df["High"],df["Low"],df["Close"],df["Volume"]):
-        out.append({"t":datetime.fromtimestamp(int(t.timestamp()),tz=timezone.utc).isoformat(),"o":float(o),"h":float(h),"l":float(l),"c":float(c),"v":float(v)})
-    return out
-
-@app.get("/v1/ohlcv")
-def ohlcv(symbol: str):
+def resolve(q:str, preferUS:int=1):
+    t=os.environ.get("EODHD_API_KEY","").strip()
+    if not t: return {"ok":False,"error":"missing_api_key","rows":[]}
     try:
-        df=yf.Ticker(symbol).history(period="1y",interval="1d",auto_adjust=False)
-        if df.empty: raise HTTPException(404,"no_data")
-        return {"rows":to_rows(df)}
-    except Exception:
-        raise HTTPException(502,"upstream_unavailable")
+        raw=eod_search(q,t); rows=[]
+        for it in raw:
+            code=it.get("Code") or it.get("code") or ""
+            ex=it.get("Exchange") or it.get("exchange") or ""
+            name=it.get("Name") or it.get("name") or ""
+            score=it.get("Score") or it.get("score") or 0
+            rows.append({"code":code,"exchange":ex,"name":name,"score":score})
+        if preferUS: rows=sorted(rows,key=lambda x:(x["exchange"]!="US",-float(x["score"] or 0)))
+        return {"ok":True,"rows":rows}
+    except Exception as e: return {"ok":False,"error":"upstream","detail":str(e),"rows":[]}
