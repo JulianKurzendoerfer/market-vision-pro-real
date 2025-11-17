@@ -115,3 +115,5 @@ def indicators(symbol:str):
         macd_signal=float(pd.Series(ema12-ema26).ewm(span=9,adjust=False).mean().iloc[-1])
         return {"price":price,"rsi":rsi,"stoch_k":stoch_k,"stoch_d":stoch_d,"macd_line":macd_line,"macd_signal":macd_signal,"ema20":ema20,"ema50":ema50}
     return _cache(key,run)
+
+# redeploy 2025-11-17 14:12:19
