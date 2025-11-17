@@ -117,3 +117,123 @@ def indicators(symbol:str):
     return _cache(key,run)
 
 # redeploy 2025-11-17 14:12:19
+from fastapi import APIRouter, Query
+router = APIRouter()
+import os, time, math, json, requests
+def _now(): return int(time.time())
+_CACHE={} ; _TTL=600
+def _eod_symbol(s):
+    if "." in s: return s
+    return f"{s}.US"
+def _fetch_ohlcv(symbol):
+    key=os.environ.get("EODHD_API_KEY","")
+    sym=_eod_symbol(symbol)
+    url=f"https://eodhd.com/api/eod/{sym}?api_token={key}&from=2000-01-01&fmt=json"
+    r=requests.get(url,timeout=30)
+    if r.status_code!=200: return None
+    arr=r.json()
+    if not isinstance(arr,list) or not arr: return None
+    arr=sorted(arr,key=lambda x:x["date"])
+    t=[x["date"] for x in arr]
+    o=[float(x["open"]) for x in arr]
+    h=[float(x["high"]) for x in arr]
+    l=[float(x["low"]) for x in arr]
+    c=[float(x["close"]) for x in arr]
+    v=[float(x.get("volume",0.0)) for x in arr]
+    return {"time":t,"open":o,"high":h,"low":l,"close":c,"volume":v}
+def _ema(vals,span):
+    k=2/(span+1)
+    ema=[]
+    prev=None
+    for x in vals:
+        prev = x if prev is None else (x-prev)*k+prev
+        ema.append(prev)
+    return ema
+def _rsi(close,period=14):
+    gains=[];losses=[]
+    for i in range(1,len(close)):
+        d=close[i]-close[i-1]
+        gains.append(max(d,0.0));losses.append(max(-d,0.0))
+    if len(gains)<period: return [None]*len(close)
+    avg_gain=sum(gains[:period])/period
+    avg_loss=sum(losses[:period])/period
+    rsi=[None]*(period)
+    for i in range(period,len(close)-1):
+        g=gains[i-1];l=losses[i-1]
+        avg_gain=(avg_gain*(period-1)+g)/period
+        avg_loss=(avg_loss*(period-1)+l)/period
+        rs=math.inf if avg_loss==0 else avg_gain/avg_loss
+        rsi.append(100-100/(1+rs))
+    rsi.append(rsi[-1])
+    return rsi
+def _rolling_max(arr,win,i):
+    a=max(arr[max(0,i-win+1):i+1])
+    return a
+def _rolling_min(arr,win,i):
+    a=min(arr[max(0,i-win+1):i+1])
+    return a
+def _stoch(close,high,low,period=14,signal=3):
+    k=[]
+    for i in range(len(close)):
+        if i<period-1: k.append(None); continue
+        hh=max(high[i-period+1:i+1]); ll=min(low[i-period+1:i+1])
+        val=None if hh==ll else (close[i]-ll)/(hh-ll)*100
+        k.append(val)
+    d=[]
+    for i in range(len(k)):
+        if i<period-1+signal-1: d.append(None); continue
+        vals=[x for x in k[i-signal+1:i+1] if x is not None]
+        d.append(None if len(vals)<signal else sum(vals)/signal)
+    return k,d
+def _macd(close,fast=12,slow=26,signal=9):
+    ema_fast=_ema(close,fast)
+    ema_slow=_ema(close,slow)
+    macd=[ema_fast[i]-ema_slow[i] for i in range(len(close))]
+    sig=_ema(macd,signal)
+    hist=[macd[i]-sig[i] for i in range(len(close))]
+    return macd,sig,hist
+def _pivots(high,low,win=5,cap=12):
+    piv=[]
+    for i in range(len(high)):
+        if i<win or i>=len(high)-win: continue
+        is_h=high[i]==max(high[i-win:i+win+1])
+        is_l=low[i]==min(low[i-win:i+win+1])
+        if is_h: piv.append({"i":i,"type":"H","p":high[i]})
+        elif is_l: piv.append({"i":i,"type":"L","p":low[i]})
+    return piv[-cap:]
+def _trendlines(piv):
+    highs=[x for x in piv if x["type"]=="H"]
+    lows=[x for x in piv if x["type"]=="L"]
+    lines=[]
+    if len(highs)>=2:
+        a=highs[-2];b=highs[-1]
+        lines.append({"from":{"i":a["i"],"p":a["p"]},"to":{"i":b["i"],"p":b["p"]},"kind":"H"})
+    if len(lows)>=2:
+        a=lows[-2];b=lows[-1]
+        lines.append({"from":{"i":a["i"],"p":a["p"]},"to":{"i":b["i"],"p":b["p"]},"kind":"L"})
+    return lines
+@router.get("/v1/bundle")
+def bundle(symbol: str = Query(...)):
+    key=(symbol.upper(),)
+    now=_now()
+    hit=_CACHE.get(key)
+    if hit and now-hit["ts"]<_TTL:
+        d=hit["data"].copy(); d["cache"]["stale"]=False; return d
+    ohlcv=_fetch_ohlcv(symbol)
+    if not ohlcv:
+        if hit:
+            d=hit["data"].copy(); d["cache"]["stale"]=True; return d
+        return {"meta":{"symbol":symbol},"ohlcv":{"time":[],"open":[],"high":[],"low":[],"close":[],"volume":[]},"indicators":{"ema20":None,"ema50":None,"rsi14":None,"stochK":None,"stochD":None,"macdLine":None,"macdSignal":None,"macdHist":None,"last":None},"trend":{"pivots":[],"lines":[]},"cache":{"ttl_sec":_TTL,"source":"EODHD","stale":False}}
+    t=ohlcv["time"]; c=ohlcv["close"]; h=ohlcv["high"]; l=ohlcv["low"]
+    ema20=_ema(c,20); ema50=_ema(c,50)
+    rsi14=_rsi(c,14)
+    stK,stD=_stoch(c,h,l,14,3)
+    mL,mS,mH=_macd(c,12,26,9)
+    piv=_pivots(h,l,5,12); lines=_trendlines(piv)
+    data={"meta":{"symbol":symbol,"currency":"USD","tz":"UTC","asof":t[-1] if t else None},"ohlcv":ohlcv,"indicators":{"ema20":ema20,"ema50":ema50,"rsi14":rsi14,"stochK":stK,"stochD":stD,"macdLine":mL,"macdSignal":mS,"macdHist":mH,"last":c[-1] if c else None},"trend":{"pivots":piv,"lines":lines},"cache":{"ttl_sec":_TTL,"source":"EODHD","stale":False}}
+    _CACHE[key]={"ts":now,"data":data}
+    return data
+try:
+    app.include_router(router)
+except:
+    pass
