@@ -1,91 +1,96 @@
 import os
-import time
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
+import httpx
 import numpy as np
 import pandas as pd
-import yfinance as yf
-from fastapi import FastAPI, Query, Body
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Query
 from pydantic import BaseModel
 
-from .indicators import compute_bundle
+from indicators import compute_bundle
 
 app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_headers=["*"],
-    allow_methods=["*"],
-)
 
-RANGE_MAP = {
-    "1M": 30,
-    "3M": 90,
-    "6M": 180,
-    "1Y": 365,
-    "5Y": 365*5,
-    "MAX": 365*30,
-}
+DATA_API_BASE = os.getenv("DATA_API_BASE", "https://market-vision-pro-real.onrender.com")
+DATA_API_KEY = os.getenv("DATA_API_KEY")
 
-def _date_from_range(r: str) -> datetime:
-    days = RANGE_MAP.get(r.upper(), 365)
-    return datetime.utcnow() - timedelta(days=days)
+def _headers() -> Dict[str, str]:
+    h = {}
+    if DATA_API_KEY:
+        h["X-API-KEY"] = DATA_API_KEY
+        h["Authorization"] = DATA_API_KEY
+    return h
 
-def fetch_ohlc(symbol: str, r: str) -> pd.DataFrame:
-    start = _date_from_range(r)
-    df = yf.download(symbol, start=start.date().isoformat(), progress=False, auto_adjust=False)
-    if df is None or df.empty:
-        return pd.DataFrame(columns=["open","high","low","close","volume"])
-    out = df.rename(columns=str.lower)[["open","high","low","close","volume"]].copy()
-    out.reset_index(inplace=True)
-    out["t"] = pd.to_datetime(out["date"]).astype("int64")//10**9
-    return out[["t","open","high","low","close","volume"]]
+class OhlcvIn(BaseModel):
+    t: List[Any]
+    o: List[float]
+    h: List[float]
+    l: List[float]
+    c: List[float]
+    v: Optional[List[float]] = None
+    meta: Optional[Dict[str, Any]] = None
 
-def to_list(x: pd.Series):
-    y = pd.to_numeric(x, errors="coerce").replace([np.inf,-np.inf], np.nan)
-    return y.astype(float).where(pd.notna(y), None).tolist()
-
-class ComputeBody(BaseModel):
-    close: List[float]
-    high: List[float]
-    low: List[float]
+def _to_df(d: Dict[str, Any]) -> pd.DataFrame:
+    df = pd.DataFrame({
+        "t": d.get("t", []),
+        "open": d.get("o", []),
+        "high": d.get("h", []),
+        "low": d.get("l", []),
+        "close": d.get("c", []),
+        "volume": d.get("v", []),
+    })
+    return df
 
 @app.get("/health")
-def health() -> Dict[str, Any]:
-    return {"ok": True, "ts": int(time.time())}
-
-@app.post("/v1/compute")
-def v1_compute(body: ComputeBody):
-    n = len(body.close)
-    if not (len(body.high)==n and len(body.low)==n and n>0):
-        return {"ok": False, "error": "invalid input"}
-    df = pd.DataFrame({"close": body.close, "high": body.high, "low": body.low})
-    inds = compute_bundle(df)
-    return {"ok": True, "indicators": inds}
+def health():
+    return {"ok": True}
 
 @app.get("/v1/bundle")
-def v1_bundle(symbol: str = Query(...), range: str = Query("1Y")):
-    df = fetch_ohlc(symbol, range)
-    if df.empty:
-        return {"ok": False, "error": "no_data"}
-    inds = compute_bundle(df.rename(columns={"t":"time"}))
-    meta = {
-        "symbol": symbol.upper(),
-        "currency": None,
-        "tz": "UTC",
-    }
+async def v1_bundle(symbol: str = Query(...), range: str = Query(...)):
+    async with httpx.AsyncClient(base_url=DATA_API_BASE, timeout=30.0) as client:
+        r = await client.get("/v1/bundle", params={"symbol": symbol, "range": range}, headers=_headers())
+        r.raise_for_status()
+        d = r.json()
+    return d
+
+@app.get("/v1/compute")
+async def v1_compute(symbol: str = Query(...), range: str = Query(...)):
+    async with httpx.AsyncClient(base_url=DATA_API_BASE, timeout=30.0) as client:
+        r = await client.get("/v1/bundle", params={"symbol": symbol, "range": range}, headers=_headers())
+        r.raise_for_status()
+        d = r.json()
+    df = _to_df(d)
+    inds = compute_bundle(df.rename(columns={"t": "time"}))
     out = {
         "ok": True,
-        "asof": datetime.utcnow().isoformat(timespec="seconds")+"Z",
-        "meta": meta,
-        "t": to_list(df["t"]),
-        "o": to_list(df["open"]),
-        "h": to_list(df["high"]),
-        "l": to_list(df["low"]),
-        "c": to_list(df["close"]),
-        "v": to_list(df["volume"]),
+        "asof": datetime.now(timezone.utc).isoformat(),
+        "meta": d.get("meta", {}),
+        "t": d.get("t", []),
+        "o": d.get("o", []),
+        "h": d.get("h", []),
+        "l": d.get("l", []),
+        "c": d.get("c", []),
+        "v": d.get("v", []),
+        "indicators": inds,
+    }
+    return out
+
+@app.post("/v1/compute")
+def v1_compute_post(body: OhlcvIn):
+    d = body.model_dump()
+    df = _to_df(d)
+    inds = compute_bundle(df.rename(columns={"t": "time"}))
+    out = {
+        "ok": True,
+        "asof": datetime.now(timezone.utc).isoformat(),
+        "meta": d.get("meta", {}),
+        "t": d.get("t", []),
+        "o": d.get("o", []),
+        "h": d.get("h", []),
+        "l": d.get("l", []),
+        "c": d.get("c", []),
+        "v": d.get("v", []),
         "indicators": inds,
     }
     return out
