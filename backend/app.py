@@ -1,4 +1,5 @@
-import os, time, datetime as dt, requests, pandas as pd
+from pydantic import BaseModel
+
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from indicators import compute
@@ -64,3 +65,24 @@ def bundle(symbol: str=Query(...), range: str=Query("1Y")):
 @app.get("/v1/resolve")
 def resolve(q: str=Query(...), prefer: str=Query("US")):
     return {"ok":True,"asof":dt.datetime.utcnow().isoformat(),"hits":[{"code":q.upper(),"score":1}]}
+
+class OhlcvIn(BaseModel):
+    t:list|None=None
+    h:list|None=None
+    l:list|None=None
+    c:list|None=None
+    v:list|None=None
+
+@app.post("/v1/compute")
+def v1_compute(body: OhlcvIn):
+    o={"t":body.t or [],"h":body.h or [],"l":body.l or [],"c":body.c or [],"v":body.v or []}
+    ind=compute_from_ohlcv(o)
+    return {"ok":True,"indicators":ind,"options":{"supported":False}}
+
+@app.get("/v1/compute_bundle")
+def v1_compute_bundle(symbol: str, range: str="1Y"):
+    b=bundle(symbol=symbol, range=range)
+    o=b.get("ohlcv") if isinstance(b,dict) else None
+    ind=compute_from_ohlcv(o) if o else {}
+    r={"ok":True,"meta":b.get("meta") if isinstance(b,dict) else {}, "ohlcv":o or {}, "indicators":ind, "options":{"supported":False}}
+    return r
