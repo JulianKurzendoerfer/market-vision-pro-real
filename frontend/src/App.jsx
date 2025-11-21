@@ -1,189 +1,107 @@
-import React,{useEffect,useRef,useState}from"react"
-import{createChart}from"lightweight-charts"
-const fmt=(x)=>x==null?"-":(Math.round(x*100)/100).toString()
-function useBundle(range,symbolText){
-  const[query,setQuery]=useState(symbolText||"Apple")
-  const[symbol,setSymbol]=useState(null)
-  const[data,setData]=useState(null)
-  const[loading,setLoading]=useState(false)
-  const load=async()=>{
-    setLoading(true)
-    let sym=query.trim()
-    try{
-      const r=await fetch("/v1/resolve?q="+encodeURIComponent(query))
-      const j=await r.json()
-      if(Array.isArray(j)&&j.length>0&&j[0].code){sym=j[0].code}
-    }catch(e){}
-    setSymbol(sym)
-    const b=await fetch("/v1/bundle?symbol="+encodeURIComponent(sym))
-    const bj=await b.json()
-    setData(bj)
-    setLoading(false)
-  }
-  return{query,setQuery,symbol,data,load,loading}
-}
-function toSec(s){return Math.floor(new Date(s).getTime()/1000)}
-function sliceIdx(times,days){
-  if(!times||times.length===0)return 0
-  if(days==="MAX")return 0
-  const end=toSec(times[times.length-1])
-  const delta=days*24*3600
-  const from=end-delta
-  let i=0
-  for(let k=0;k<times.length;k++){if(toSec(times[k])>=from){i=k;break}}
-  return i
-}
-function CandleChart({rootId,ohlcv,ema20,ema50,range}){
-  const ref=useRef(null)
-  useEffect(()=>{
-    const el=document.getElementById(rootId)
-    if(!el||!ohlcv||ohlcv.time.length===0)return
-    el.innerHTML=""
-    const chart=createChart(el,{width:el.clientWidth,height:el.clientHeight,rightPriceScale:{visible:true},leftPriceScale:{visible:false},timeScale:{timeVisible:true,secondsVisible:false}})
-    const cs=chart.addCandlestickSeries()
-    const i0=sliceIdx(ohlcv.time,range)
-    const t=ohlcv.time.slice(i0).map(toSec)
-    cs.setData(ohlcv.time.slice(i0).map((d,ix)=>({time:t[ix],open:ohlcv.open[i0+ix],high:ohlcv.high[i0+ix],low:ohlcv.low[i0+ix],close:ohlcv.close[i0+ix]})))
-    if(ema20){
-      const s=chart.addLineSeries({lineWidth:1})
-      s.setData(ohlcv.time.slice(i0).map((d,ix)=>({time:t[ix],value:ema20[i0+ix]})))
-    }
-    if(ema50){
-      const s=chart.addLineSeries({lineWidth:1})
-      s.setData(ohlcv.time.slice(i0).map((d,ix)=>({time:t[ix],value:ema50[i0+ix]})))
-    }
-    chart.timeScale().setVisibleRange({from:t[0],to:t[t.length-1]})
-    const ro=new ResizeObserver(()=>{chart.applyOptions({width:el.clientWidth,height:el.clientHeight})})
-    ro.observe(el)
-    return()=>{ro.disconnect();chart.remove()}
-  },[rootId,ohlcv,ema20,ema50,range])
-  return null
-}
-function LineChart({rootId,times,vals,bands,range}){
-  const ref=useRef(null)
-  useEffect(()=>{
-    const el=document.getElementById(rootId)
-    if(!el||!times||times.length===0)return
-    el.innerHTML=""
-    const chart=createChart(el,{width:el.clientWidth,height:el.clientHeight,leftPriceScale:{visible:false},rightPriceScale:{visible:true},timeScale:{timeVisible:true,secondsVisible:false}})
-    const i0=sliceIdx(times,range)
-    const t=times.slice(i0).map(toSec)
-    const ls=chart.addLineSeries({lineWidth:1})
-    ls.setData(t.map((tt,ix)=>({time:tt,value:vals[i0+ix]})))
-    if(bands&&bands.length){
-      for(const b of bands){
-        const s=chart.addLineSeries({lineWidth:1})
-        s.setData(t.map(tt=>({time:tt,value:b})))
-      }
-    }
-    chart.timeScale().setVisibleRange({from:t[0],to:t[t.length-1]})
-    const ro=new ResizeObserver(()=>{chart.applyOptions({width:el.clientWidth,height:el.clientHeight})})
-    ro.observe(el)
-    return()=>{ro.disconnect();chart.remove()}
-  },[rootId,times,vals,bands,range])
-  return null
-}
-function MacdChart({rootId,times,macd,signal,hist,range}){
-  useEffect(()=>{
-    const el=document.getElementById(rootId)
-    if(!el||!times||times.length===0)return
-    el.innerHTML=""
-    const chart=createChart(el,{width:el.clientWidth,height:el.clientHeight,leftPriceScale:{visible:false},rightPriceScale:{visible:true},timeScale:{timeVisible:true,secondsVisible:false}})
-    const i0=sliceIdx(times,range)
-    const t=times.slice(i0).map(toSec)
-    const hs=chart.addHistogramSeries({priceFormat:{type:"price",precision:2,minMove:0.01}})
-    hs.setData(t.map((tt,ix)=>({time:tt,value:hist[i0+ix]})))
-    const m=chart.addLineSeries({lineWidth:1})
-    const s=chart.addLineSeries({lineWidth:1})
-    m.setData(t.map((tt,ix)=>({time:tt,value:macd[i0+ix]})))
-    s.setData(t.map((tt,ix)=>({time:tt,value:signal[i0+ix]})))
-    chart.timeScale().setVisibleRange({from:t[0],to:t[t.length-1]})
-    const ro=new ResizeObserver(()=>{chart.applyOptions({width:el.clientWidth,height:el.clientHeight})})
-    ro.observe(el)
-    return()=>{ro.disconnect();chart.remove()}
-  },[rootId,times,macd,signal,hist,range])
-  return null
-}
-function TrendChart({rootId,ohlcv,trend,range}){
-  useEffect(()=>{
-    const el=document.getElementById(rootId)
-    if(!el||!ohlcv||ohlcv.time.length===0)return
-    el.innerHTML=""
-    const chart=createChart(el,{width:el.clientWidth,height:el.clientHeight,leftPriceScale:{visible:false},rightPriceScale:{visible:true},timeScale:{timeVisible:true,secondsVisible:false}})
-    const i0=sliceIdx(ohlcv.time,range)
-    const t=ohlcv.time.slice(i0).map(toSec)
-    const ls=chart.addLineSeries({lineWidth:1})
-    ls.setData(t.map((tt,ix)=>({time:tt,value:ohlcv.close[i0+ix]})))
-    if(trend&&trend.pivots&&trend.pivots.length){
-      const ms=chart.addLineSeries({lineWidth:0})
-      ms.setData(trend.pivots.map(p=>({time:toSec(ohlcv.time[p.i]),value:p.p})))
-    }
-    if(trend&&trend.lines){
-      for(const ln of trend.lines){
-        const s=chart.addLineSeries({lineWidth:1})
-        s.setData([{time:toSec(ohlcv.time[ln.from.i]),value:ln.from.p},{time:toSec(ohlcv.time[ln.to.i]),value:ln.to.p}])
-      }
-    }
-    chart.timeScale().setVisibleRange({from:t[0],to:t[t.length-1]})
-    const ro=new ResizeObserver(()=>{chart.applyOptions({width:el.clientWidth,height:el.clientHeight})})
-    ro.observe(el)
-    return()=>{ro.disconnect();chart.remove()}
-  },[rootId,ohlcv,trend,range])
-  return null
-}
+import {useEffect,useRef,useState} from "react"
+import {createChart,CrosshairMode} from "lightweight-charts"
+
+const API=import.meta.env.VITE_API_BASE
+
+function linechart(el,h){const c=createChart(el,{height:h,layout:{textColor:'#222',background:{type:'solid',color:'#fff'}},grid:{vertLines:{color:'#eee'},horzLines:{color:'#eee'}},crosshair:{mode:CrosshairMode.Normal},timeScale:{timeVisible:true,secondsVisible:false}});return c}
+function candchart(el,h){const c=linechart(el,h);const s=c.addCandlestickSeries({upColor:"#26a69a",downColor:"#ef5350",borderVisible:false,wickUpColor:"#26a69a",wickDownColor:"#ef5350"});return {c,s}}
+
 export default function App(){
-  const[r,setR]=useState("1Y")
-  const{query,setQuery,symbol,data,load,loading}=useBundle(r,"Apple")
-  const t=data?.ohlcv?.time||[]
-  const c=data?.ohlcv?.close||[]
-  const e20=data?.indicators?.ema20||null
-  const e50=data?.indicators?.ema50||null
-  const rsi=data?.indicators?.rsi14||null
-  const k=data?.indicators?.stochK||null
-  const d=data?.indicators?.stochD||null
-  const mL=data?.indicators?.macdLine||null
-  const mS=data?.indicators?.macdSignal||null
-  const mH=data?.indicators?.macdHist||null
-  return(
-    <div style={{padding:"20px",fontFamily:"system-ui"}}>
-      <div style={{display:"flex",alignItems:"center",gap:8}}>
-        <h2 style={{margin:"0 12px 0 0"}}>Market Vision Pro</h2>
-        <input value={query} onChange={e=>setQuery(e.target.value)} style={{padding:"6px 8px"}}/>
-        <button onClick={load} disabled={loading} style={{padding:"6px 10px"}}>load</button>
-        <span style={{marginLeft:12}}>{symbol||""}</span>
-        <div style={{marginLeft:"auto",display:"flex",gap:8}}>
-          {["1M","3M","6M","1Y","5Y","MAX"].map(x=>(
-            <button key={x} onClick={()=>setR(x==="1M"?30:x==="3M"?90:x==="6M"?180:x==="1Y"?365:x==="5Y"?365*5:"MAX")} style={{padding:"4px 8px"}}>{x}</button>
-          ))}
+  const [q,setQ]=useState("Apple")
+  const [range,setRange]=useState("1Y")
+  const [busy,setBusy]=useState(false)
+  const roots=useRef({})
+  const charts=useRef({})
+  const [sym,setSym]=useState("")
+
+  useEffect(()=>()=>Object.values(charts.current).forEach(x=>x?.remove?.()),[])
+
+  async function load(){
+    setBusy(true)
+    const r1=await fetch(`${API}/v1/resolve?q=${encodeURIComponent(q)}&prefer=US`)
+    const pick=(await r1.json())[0]
+    const symbol=pick?.code||q.toUpperCase()
+    setSym(symbol)
+    const r=await fetch(`${API}/v1/bundle?symbol=${encodeURIComponent(symbol)}&range=${range}`)
+    const b=await r.json()
+    draw(b)
+    setBusy(false)
+  }
+
+  function draw(b){
+    Object.values(charts.current).forEach(x=>x?.remove?.())
+    charts.current={}
+    const h=320
+    const o=b?.ohlcv||[]
+    const ohlc=o.map(d=>({time:d.t,open:d.o,high:d.h,low:d.l,close:d.c}))
+    const t=o.map(d=>d.t)
+
+    const r1=candchart(roots.current.c1,h); r1.s.setData(ohlc)
+    if(b?.indicators?.ema20&&b?.indicators?.ema50){
+      const ema20=r1.c.addLineSeries({lineWidth:2}); ema20.setData(b.indicators.ema20.map((v,i)=>({time:t[i],value:v})))
+      const ema50=r1.c.addLineSeries({lineWidth:2}); ema50.setData(b.indicators.ema50.map((v,i)=>({time:t[i],value:v})))
+    }
+    charts.current.c1=r1.c
+
+    const c2=linechart(roots.current.c2,h)
+    if(b?.indicators?.stockK&&b?.indicators?.stockD){
+      const k=c2.addLineSeries({lineWidth:2}); k.setData(b.indicators.stockK.map((v,i)=>({time:t[i],value:v})))
+      const d=c2.addLineSeries({lineWidth:2}); d.setData(b.indicators.stockD.map((v,i)=>({time:t[i],value:v})))
+      c2.priceScale("right").applyOptions({autoScale:true})
+    }
+    charts.current.c2=c2
+
+    const c3=linechart(roots.current.c3,h)
+    if(b?.indicators?.rsi){
+      const r=c3.addLineSeries({lineWidth:2}); r.setData(b.indicators.rsi.map((v,i)=>({time:t[i],value:v})))
+    }
+    charts.current.c3=c3
+
+    const c4=linechart(roots.current.c4,h)
+    if(b?.indicators?.macdLine&&b?.indicators?.macdSignal&&b?.indicators?.macdHist){
+      const l=c4.addLineSeries({lineWidth:2}); l.setData(b.indicators.macdLine.map((v,i)=>({time:t[i],value:v})))
+      const s=c4.addLineSeries({lineWidth:2}); s.setData(b.indicators.macdSignal.map((v,i)=>({time:t[i],value:v})))
+      const hst=c4.addHistogramSeries({base:0}); hst.setData(b.indicators.macdHist.map((v,i)=>({time:t[i],value:v})))
+    }
+    charts.current.c4=c4
+
+    const c5=linechart(roots.current.c5,h)
+    let pivH=b?.indicators?.pivotsH, pivL=b?.indicators?.pivotsL
+    if(!pivH||!pivL){
+      const ph=[],pl=[]
+      for(let i=2;i<ohlc.length-2;i++){
+        const a=ohlc[i]
+        if(a.high>ohlc[i-1].high&&a.high>ohlc[i+1].high) ph.push({time:a.time,value:a.high})
+        if(a.low<ohlc[i-1].low&&a.low<ohlc[i+1].low) pl.push({time:a.time,value:a.low})
+      }
+      pivH=ph; pivL=pl
+    }
+    const hs=c5.addScatterSeries?c5.addScatterSeries({}) : c5.addLineSeries({lineWidth:0})
+    const ls=c5.addScatterSeries?c5.addScatterSeries({}) : c5.addLineSeries({lineWidth:0})
+    hs.setData(pivH.slice(-100))
+    ls.setData(pivL.slice(-100))
+    const last2H=pivH.slice(-2), last2L=pivL.slice(-2)
+    if(last2H.length===2){const tl=c5.addLineSeries({lineWidth:2}); tl.setData(last2H)}
+    if(last2L.length===2){const tl2=c5.addLineSeries({lineWidth:2}); tl2.setData(last2L)}
+    charts.current.c5=c5
+  }
+
+  return (
+    <div style={{padding:16}}>
+      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+        <input placeholder="Apple" value={q} onChange={e=>setQ(e.target.value)} style={{padding:"6px 8px",border:"1px solid #ddd",borderRadius:8,minWidth:200}}/>
+        <button onClick={load} disabled={busy} style={{padding:"6px 12px",border:"1px solid #ddd",borderRadius:8}}>{busy?"...":"load"}</button>
+        <span style={{marginLeft:8}}>{sym}</span>
+        <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+          {["1M","3M","6M","1Y","5Y","MAX"].map(r=><button key={r} onClick={()=>setRange(r)} style={{padding:"4px 10px",border:"1px solid #ddd",borderRadius:8,background:range===r?"#f2f2f2":"#fff"}}>{r}</button>)}
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginTop:16}}>
-        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}>
-          <div style={{marginBottom:8}}>Main</div>
-          <div id="c1" style={{width:"100%",height:280}}/>
-          {data&&<CandleChart rootId="c1" ohlcv={data.ohlcv} ema20={e20} ema50={e50} range={r}/>}
-        </div>
-        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}>
-          <div style={{marginBottom:8}}>Stoch K/D</div>
-          <div id="c2" style={{width:"100%",height:280}}/>
-          {data&&k&&d&&<LineChart rootId="c2" times={t} vals={k} bands={[80,20]} range={r}/>}
-          {data&&k&&d&&<LineChart rootId="c2" times={t} vals={d} bands={[]} range={r}/>}
-        </div>
-        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}>
-          <div style={{marginBottom:8}}>RSI</div>
-          <div id="c3" style={{width:"100%",height:260}}/>
-          {data&&rsi&&<LineChart rootId="c3" times={t} vals={rsi} bands={[70,30]} range={r}/>}
-        </div>
-        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}>
-          <div style={{marginBottom:8}}>MACD</div>
-          <div id="c4" style={{width:"100%",height:260}}/>
-          {data&&mL&&mS&&mH&&<MacdChart rootId="c4" times={t} macd={mL} signal={mS} hist={mH} range={r}/>}
-        </div>
-        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}>
-          <div style={{marginBottom:8}}>Trend</div>
-          <div id="c5" style={{width:"100%",height:260}}/>
-          {data&&<TrendChart rootId="c5" ohlcv={data.ohlcv} trend={data.trend} range={r}/>}
-        </div>
+      <div style={{display:"grid",gridTemplateRows:"repeat(5, 320px)",gap:16}}>
+        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}><div style={{fontWeight:600,marginBottom:8}}>Main</div><div ref={el=>roots.current.c1=el} style={{width:"100%",height:"100%"}}/></div>
+        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}><div style={{fontWeight:600,marginBottom:8}}>Stoch K/D</div><div ref={el=>roots.current.c2=el} style={{width:"100%",height:"100%"}}/></div>
+        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}><div style={{fontWeight:600,marginBottom:8}}>RSI</div><div ref={el=>roots.current.c3=el} style={{width:"100%",height:"100%"}}/></div>
+        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}><div style={{fontWeight:600,marginBottom:8}}>MACD</div><div ref={el=>roots.current.c4=el} style={{width:"100%",height:"100%"}}/></div>
+        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}><div style={{fontWeight:600,marginBottom:8}}>Trend</div><div ref={el=>roots.current.c5=el} style={{width:"100%",height:"100%"}}/></div>
       </div>
     </div>
   )
