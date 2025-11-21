@@ -1,91 +1,97 @@
 import os
+import sys
+import pathlib
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import List, Optional, Dict, Any
+
+sys.path.append(str(pathlib.Path(__file__).resolve().parent))
 
 import httpx
 import pandas as pd
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Body
 from pydantic import BaseModel
 
-from indicators import compute
+from indicators import compute as compute_indicators, compute_bundle as indicators_bundle
 
-app = FastAPI()
+app = FastAPI(title="MVP Backend", version="1.0.0")
 
-class OhlcvIn(BaseModel):
-    meta: Optional[Dict] = None
+DATA_API_BASE = os.getenv("DATA_API_BASE", "").rstrip("/")
+DATA_API_KEY = os.getenv("DATA_API_KEY", None)
+
+class OHLCIn(BaseModel):
     t: List[int]
     o: List[float]
     h: List[float]
     l: List[float]
     c: List[float]
-    v: List[float]
+    v: Optional[List[float]] = None
+    meta: Optional[Dict[str, Any]] = None
 
-def _to_df(d: Dict) -> pd.DataFrame:
-    return pd.DataFrame({
-        "t": d.get("t", []),
-        "open": d.get("o", []),
-        "high": d.get("h", []),
-        "low": d.get("l", []),
-        "close": d.get("c", []),
-        "volume": d.get("v", []),
-    })
+def _to_df(obj: Dict[str, Any]) -> pd.DataFrame:
+    t = obj.get("t", [])
+    o = obj.get("o", [])
+    h = obj.get("h", [])
+    l = obj.get("l", [])
+    c = obj.get("c", [])
+    v = obj.get("v", [None]*len(c))
+    df = pd.DataFrame({"t": t, "open": o, "high": h, "low": l, "close": c, "volume": v})
+    return df
 
-def fetch_ohlc(symbol: str, range: str) -> Dict:
-    base = os.getenv("DATA_API_BASE", "").rstrip("/")
-    if not base:
-        return {"ok": False, "error": "DATA_API_BASE missing"}
-    url = f"{base}/v1/bundle"
+async def fetch_ohlc(symbol: str, range_: str) -> pd.DataFrame:
+    if not DATA_API_BASE:
+        return pd.DataFrame()
+    url = f"{DATA_API_BASE}/v1/bundle"
     headers = {}
-    key = os.getenv("DATA_API_KEY")
-    if key: headers["X-API-KEY"] = key
-    params = {"symbol": symbol, "range": range}
-    with httpx.Client(timeout=20.0) as client:
-        r = client.get(url, params=params, headers=headers)
+    if DATA_API_KEY:
+        headers["X-API-KEY"] = DATA_API_KEY
+    params = {"symbol": symbol, "range": range_}
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(url, params=params, headers=headers)
         r.raise_for_status()
-        j = r.json()
-    if not j or not j.get("ok"):
-        return {"ok": False, "error": "upstream_no_ok"}
-    return {
-        "ok": True,
-        "meta": j.get("meta", {}),
-        "t": j.get("t", []),
-        "o": j.get("o", []),
-        "h": j.get("h", []),
-        "l": j.get("l", []),
-        "c": j.get("c", []),
-        "v": j.get("v", []),
-    }
+        js = r.json()
+    t = js.get("t", [])
+    o = js.get("o", [])
+    h = js.get("h", [])
+    l = js.get("l", [])
+    c = js.get("c", [])
+    v = js.get("v", [None]*len(c))
+    df = pd.DataFrame({"t": t, "open": o, "high": h, "low": l, "close": c, "volume": v})
+    return df
 
 @app.get("/health")
 def health():
-    return {"ok": True, "asof": datetime.now(timezone.utc).isoformat()}
+    return {"ok": True}
 
 @app.get("/v1/bundle")
-def v1_bundle(symbol: str = Query(...), range: str = Query(...)):
-    d = fetch_ohlc(symbol, range)
-    if not d.get("ok"):
-        return {"ok": False, "error": d.get("error", "fetch_failed")}
-    df = _to_df(d)
-    inds = compute(df.rename(columns={"t":"time"}))
+async def v1_bundle(symbol: str = Query(...), range: str = Query("1Y")):
+    df = await fetch_ohlc(symbol, range)
+    if df.empty:
+        return {"ok": False, "error": "no_data"}
+    inds = indicators_bundle(df.rename(columns={"t": "time"}))
+    meta = {
+        "symbol": symbol.upper(),
+        "currency": None,
+        "tz": "UTC",
+    }
     out = {
         "ok": True,
         "asof": datetime.now(timezone.utc).isoformat(),
-        "meta": d.get("meta", {}),
-        "t": d.get("t", []),
-        "o": d.get("o", []),
-        "h": d.get("h", []),
-        "l": d.get("l", []),
-        "c": d.get("c", []),
-        "v": d.get("v", []),
-        "indicators": inds,
+        "meta": meta,
+        "t": inds["t"],
+        "o": inds["o"],
+        "h": inds["h"],
+        "l": inds["l"],
+        "c": inds["c"],
+        "v": inds["v"],
+        "indicators": inds["indicators"],
     }
     return out
 
 @app.post("/v1/compute")
-def v1_compute(body: OhlcvIn):
+def v1_compute(body: OHLCIn = Body(...)):
     d = body.model_dump()
     df = _to_df(d)
-    inds = compute(df.rename(columns={"t":"time"}))
+    inds = compute_indicators(df)
     out = {
         "ok": True,
         "asof": datetime.now(timezone.utc).isoformat(),
