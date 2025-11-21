@@ -1,107 +1,122 @@
 import {useEffect,useRef,useState} from "react"
-import {createChart,CrosshairMode} from "lightweight-charts"
 
 const API=import.meta.env.VITE_API_BASE
-
-function linechart(el,h){const c=createChart(el,{height:h,layout:{textColor:'#222',background:{type:'solid',color:'#fff'}},grid:{vertLines:{color:'#eee'},horzLines:{color:'#eee'}},crosshair:{mode:CrosshairMode.Normal},timeScale:{timeVisible:true,secondsVisible:false}});return c}
-function candchart(el,h){const c=linechart(el,h);const s=c.addCandlestickSeries({upColor:"#26a69a",downColor:"#ef5350",borderVisible:false,wickUpColor:"#26a69a",wickDownColor:"#ef5350"});return {c,s}}
+function toTs(s){return new Date(s).getTime()}
+function ema(arr,p){let k=2/(p+1),out=new Array(arr.length).fill(null);let s=0,c=0;for(let i=0;i<arr.length;i++){let v=arr[i];if(v==null)continue;if(c<p){s+=v;c++;if(c===p){out[i]=s/p}}else{out[i]=v*k+out[i-1]*(1-k)}}return out}
+function rsi(arr,p=14){let out=new Array(arr.length).fill(null);let gain=0,loss=0,prev=null;let up=0,down=0;for(let i=0;i<arr.length;i++){let v=arr[i];if(prev==null){prev=v}else{let ch=v-prev;prev=v;if(i<=p){if(ch>0){gain+=ch}else{loss-=Math.min(ch,0)}if(i===p){up=gain/p;down=loss/p;out[i]=down===0?100:100-100/(1+up/down)}}else{up=(up*(p-1)+(ch>0?ch:0))/p;down=(down*(p-1)+(ch<0?-ch:0))/p;out[i]=down===0?100:100-100/(1+up/down)}}}return out}
+function stoch(h,l,c,kp=14,dp=3){let k=new Array(c.length).fill(null),d=new Array(c.length).fill(null);for(let i=0;i<c.length;i++){if(i<kp-1)continue;let hh=-1e99,ll=1e99;for(let j=i-kp+1;j<=i;j++){if(h[j]>hh)hh=h[j];if(l[j]<ll)ll=l[j]}k[i]=((c[i]-ll)/(hh-ll))*100}for(let i=0;i<c.length;i++){if(i<kp-1+dp-1)continue;let s=0;for(let j=i-dp+1;j<=i;j++){s+=k[j]}d[i]=s/dp}return {k,d}}
+function macd(arr,fast=12,slow=26,signal=9){let f=ema(arr,fast),s=ema(arr,slow);let line=arr.map((_,i)=>f[i]==null||s[i]==null?null:f[i]-s[i]);let sig=ema(line.filter(v=>v!=null),signal);let sigSeries=new Array(arr.length).fill(null);let idx=0;for(let i=0;i<arr.length;i++){if(line[i]!=null){sigSeries[i]=sig[idx++]} }let hist=line.map((_,i)=>line[i]==null||sigSeries[i]==null?null:line[i]-sigSeries[i]);return {line,sig:sigSeries,hist}}
+function pivots(close,w=5){let n=close.length;let ph=new Array(n).fill(null),pl=new Array(n).fill(null);for(let i=w;i<n-w;i++){let v=close[i];let hi=true,lo=true;for(let j=i-w;j<=i+w;j++){if(close[j]>v)lo=false;if(close[j]<v)hi=false}if(hi)ph[i]=v;if(lo)pl[i]=v}let trend=new Array(n).fill(null);let last=null;for(let i=0;i<n;i++){if(ph[i]!=null||pl[i]!=null){if(last==null){last=i}else{trend[last]= (ph[last]!=null?ph[last]:pl[last]);trend[i]= (ph[i]!=null?ph[i]:pl[i]);last=i}}}return {ph,pl,trend}}
+function useChart(ref,config){const inst=useRef(null);useEffect(()=>{if(!ref.current)return;if(inst.current){inst.current.destroy()}inst.current=new Chart(ref.current.getContext("2d"),config());return ()=>{if(inst.current){inst.current.destroy();inst.current=null}}},[ref,config]);return inst}
 
 export default function App(){
   const [q,setQ]=useState("Apple")
-  const [range,setRange]=useState("1Y")
   const [busy,setBusy]=useState(false)
-  const roots=useRef({})
-  const charts=useRef({})
-  const [sym,setSym]=useState("")
-
-  useEffect(()=>()=>Object.values(charts.current).forEach(x=>x?.remove?.()),[])
+  const [range,setRange]=useState("1Y")
+  const cMain=useRef(null),cRSI=useRef(null),cStoch=useRef(null),cMACD=useRef(null),cTrend=useRef(null)
+  const dataRef=useRef(null)
 
   async function load(){
+    if(busy)return
     setBusy(true)
-    const r1=await fetch(`${API}/v1/resolve?q=${encodeURIComponent(q)}&prefer=US`)
-    const pick=(await r1.json())[0]
-    const symbol=pick?.code||q.toUpperCase()
-    setSym(symbol)
-    const r=await fetch(`${API}/v1/bundle?symbol=${encodeURIComponent(symbol)}&range=${range}`)
-    const b=await r.json()
-    draw(b)
-    setBusy(false)
+    try{
+      const r=await fetch(`${API}/v1/resolve?q=${encodeURIComponent(q)}&prefer=US`)
+      const picks=await r.json()
+      const symbol=(picks[0]?.code)||q
+      const b=await fetch(`${API}/v1/bundle?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`)
+      const j=await b.json()
+      const t=j.ohlcv.time.map(toTs)
+      const open=j.ohlcv.open,high=j.ohlcv.high,low=j.ohlcv.low,close=j.ohlcv.close,vol=j.ohlcv.volume
+      let rsiSeries=j.indicators?.rsi, kSeries=j.indicators?.stochK, dSeries=j.indicators?.stochD, macdLine=j.indicators?.macdLine, macdSig=j.indicators?.macdSignal, e20=j.indicators?.ema20, e50=j.indicators?.ema50
+      if(!e20||e20.every(v=>v==null)) e20=ema(close,20)
+      if(!e50||e50.every(v=>v==null)) e50=ema(close,50)
+      if(!rsiSeries||rsiSeries.every(v=>v==null)) rsiSeries=rsi(close,14)
+      if(!kSeries||!dSeries||kSeries.every(v=>v==null)||dSeries.every(v=>v==null)){let sd=stoch(high,low,close,14,3);kSeries=sd.k;dSeries=sd.d}
+      if(!macdLine||!macdSig||macdLine.every(v=>v==null)||macdSig.every(v=>v==null)){let m=macd(close,12,26,9);macdLine=m.line;macdSig=m.sig}
+      const macdHist=macdLine.map((v,i)=>v==null||macdSig[i]==null?null:v-macdSig[i])
+      const pv=pivots(close,5)
+      dataRef.current={t,open,high,low,close,vol,e20,e50,rsi:rsiSeries,stochK:kSeries,stochD:dSeries,macdLine,macdSig,macdHist,trend:pv.trend,ph:pv.ph,pl:pv.pl}
+      renderAll()
+    }catch(e){
+      console.error(e)
+    }finally{
+      setBusy(false)
+    }
   }
 
-  function draw(b){
-    Object.values(charts.current).forEach(x=>x?.remove?.())
-    charts.current={}
-    const h=320
-    const o=b?.ohlcv||[]
-    const ohlc=o.map(d=>({time:d.t,open:d.o,high:d.h,low:d.l,close:d.c}))
-    const t=o.map(d=>d.t)
+  function renderAll(){
+    const d=dataRef.current
+    if(!d)return
 
-    const r1=candchart(roots.current.c1,h); r1.s.setData(ohlc)
-    if(b?.indicators?.ema20&&b?.indicators?.ema50){
-      const ema20=r1.c.addLineSeries({lineWidth:2}); ema20.setData(b.indicators.ema20.map((v,i)=>({time:t[i],value:v})))
-      const ema50=r1.c.addLineSeries({lineWidth:2}); ema50.setData(b.indicators.ema50.map((v,i)=>({time:t[i],value:v})))
-    }
-    charts.current.c1=r1.c
+    const mainCfg=()=>({
+      type:"line",
+      data:{labels:d.t,datasets:[
+        {type:"candlestick",label:"C",data:d.open.map((_,i)=>({x:d.t[i],o:d.open[i],h:d.high[i],l:d.low[i],c:d.close[i]})),yAxisID:"y1"},
+        {type:"line",label:"EMA20",data:d.e20.map((v,i)=>v==null?null:{x:d.t[i],y:v}),borderWidth:1,pointRadius:0,yAxisID:"y1"},
+        {type:"line",label:"EMA50",data:d.e50.map((v,i)=>v==null?null:{x:d.t[i],y:v}),borderWidth:1,pointRadius:0,yAxisID:"y1"},
+      ]},
+      options:{responsive:true,plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{x:{type:"time",time:{unit:"day"}},y1:{position:"right"}},elements:{point:{radius:0}}}
+    })
+    const rsiCfg=()=>({
+      type:"line",
+      data:{labels:d.t,datasets:[
+        {data:d.rsi.map((v,i)=>v==null?null:{x:d.t[i],y:v}),borderWidth:1,pointRadius:0},
+        {data:d.t.map(x=>({x,y:70})),borderWidth:1,pointRadius:0,borderDash:[4,4]},
+        {data:d.t.map(x=>({x,y:30})),borderWidth:1,pointRadius:0,borderDash:[4,4]},
+      ]},
+      options:{plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{x:{type:"time"},y:{min:0,max:100}},elements:{point:{radius:0}}}
+    })
+    const stochCfg=()=>({
+      type:"line",
+      data:{labels:d.t,datasets:[
+        {data:d.stochK.map((v,i)=>v==null?null:{x:d.t[i],y:v}),borderWidth:1,pointRadius:0},
+        {data:d.stochD.map((v,i)=>v==null?null:{x:d.t[i],y:v}),borderWidth:1,pointRadius:0},
+        {data:d.t.map(x=>({x,y:80})),borderWidth:1,pointRadius:0,borderDash:[4,4]},
+        {data:d.t.map(x=>({x,y:20})),borderWidth:1,pointRadius:0,borderDash:[4,4]},
+      ]},
+      options:{plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{x:{type:"time"},y:{min:0,max:100}},elements:{point:{radius:0}}}
+    })
+    const macdCfg=()=>({
+      data:{labels:d.t,datasets:[
+        {type:"bar",data:d.macdHist.map((v,i)=>v==null?null:{x:d.t[i],y:v}),barPercentage:1,categoryPercentage:1},
+        {type:"line",data:d.macdLine.map((v,i)=>v==null?null:{x:d.t[i],y:v}),borderWidth:1,pointRadius:0},
+        {type:"line",data:d.macdSig.map((v,i)=>v==null?null:{x:d.t[i],y:v}),borderWidth:1,pointRadius:0},
+      ]},
+      options:{plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{x:{type:"time"},y:{}},elements:{point:{radius:0}}}
+    })
+    const trendCfg=()=>({
+      type:"line",
+      data:{labels:d.t,datasets:[
+        {data:d.close.map((v,i)=>({x:d.t[i],y:v})),borderWidth:1,pointRadius:0},
+        {data:d.trend.map((v,i)=>v==null?null:{x:d.t[i],y:v}),borderWidth:1,pointRadius:0},
+      ]},
+      options:{plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{x:{type:"time"},y:{}},elements:{point:{radius:0}},spanGaps:true}
+    })
 
-    const c2=linechart(roots.current.c2,h)
-    if(b?.indicators?.stockK&&b?.indicators?.stockD){
-      const k=c2.addLineSeries({lineWidth:2}); k.setData(b.indicators.stockK.map((v,i)=>({time:t[i],value:v})))
-      const d=c2.addLineSeries({lineWidth:2}); d.setData(b.indicators.stockD.map((v,i)=>({time:t[i],value:v})))
-      c2.priceScale("right").applyOptions({autoScale:true})
-    }
-    charts.current.c2=c2
-
-    const c3=linechart(roots.current.c3,h)
-    if(b?.indicators?.rsi){
-      const r=c3.addLineSeries({lineWidth:2}); r.setData(b.indicators.rsi.map((v,i)=>({time:t[i],value:v})))
-    }
-    charts.current.c3=c3
-
-    const c4=linechart(roots.current.c4,h)
-    if(b?.indicators?.macdLine&&b?.indicators?.macdSignal&&b?.indicators?.macdHist){
-      const l=c4.addLineSeries({lineWidth:2}); l.setData(b.indicators.macdLine.map((v,i)=>({time:t[i],value:v})))
-      const s=c4.addLineSeries({lineWidth:2}); s.setData(b.indicators.macdSignal.map((v,i)=>({time:t[i],value:v})))
-      const hst=c4.addHistogramSeries({base:0}); hst.setData(b.indicators.macdHist.map((v,i)=>({time:t[i],value:v})))
-    }
-    charts.current.c4=c4
-
-    const c5=linechart(roots.current.c5,h)
-    let pivH=b?.indicators?.pivotsH, pivL=b?.indicators?.pivotsL
-    if(!pivH||!pivL){
-      const ph=[],pl=[]
-      for(let i=2;i<ohlc.length-2;i++){
-        const a=ohlc[i]
-        if(a.high>ohlc[i-1].high&&a.high>ohlc[i+1].high) ph.push({time:a.time,value:a.high})
-        if(a.low<ohlc[i-1].low&&a.low<ohlc[i+1].low) pl.push({time:a.time,value:a.low})
-      }
-      pivH=ph; pivL=pl
-    }
-    const hs=c5.addScatterSeries?c5.addScatterSeries({}) : c5.addLineSeries({lineWidth:0})
-    const ls=c5.addScatterSeries?c5.addScatterSeries({}) : c5.addLineSeries({lineWidth:0})
-    hs.setData(pivH.slice(-100))
-    ls.setData(pivL.slice(-100))
-    const last2H=pivH.slice(-2), last2L=pivL.slice(-2)
-    if(last2H.length===2){const tl=c5.addLineSeries({lineWidth:2}); tl.setData(last2H)}
-    if(last2L.length===2){const tl2=c5.addLineSeries({lineWidth:2}); tl2.setData(last2L)}
-    charts.current.c5=c5
+    useChart(cMain,mainCfg)
+    useChart(cRSI,rsiCfg)
+    useChart(cStoch,stochCfg)
+    useChart(cMACD,macdCfg)
+    useChart(cTrend,trendCfg)
   }
 
+  useEffect(()=>{},[])
   return (
-    <div style={{padding:16}}>
+    <div style={{padding:"8px"}}>
       <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
-        <input placeholder="Apple" value={q} onChange={e=>setQ(e.target.value)} style={{padding:"6px 8px",border:"1px solid #ddd",borderRadius:8,minWidth:200}}/>
-        <button onClick={load} disabled={busy} style={{padding:"6px 12px",border:"1px solid #ddd",borderRadius:8}}>{busy?"...":"load"}</button>
-        <span style={{marginLeft:8}}>{sym}</span>
-        <div style={{marginLeft:"auto",display:"flex",gap:6}}>
-          {["1M","3M","6M","1Y","5Y","MAX"].map(r=><button key={r} onClick={()=>setRange(r)} style={{padding:"4px 10px",border:"1px solid #ddd",borderRadius:8,background:range===r?"#f2f2f2":"#fff"}}>{r}</button>)}
-        </div>
+        <input placeholder="Apple" value={q} onChange={e=>setQ(e.target.value)} style={{padding:"8px"}}/>
+        <button onClick={load} disabled={busy} style={{padding:"8px"}}>{busy?"...":"load"}</button>
+        <span style={{marginLeft:8}}>↔</span>
+        {["1M","3M","6M","1Y","5Y","MAX"].map(r=>(
+          <button key={r} onClick={()=>{setRange(r);load()}} style={{padding:"6px"}}>{r}</button>
+        ))}
       </div>
-      <div style={{display:"grid",gridTemplateRows:"repeat(5, 320px)",gap:16}}>
-        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}><div style={{fontWeight:600,marginBottom:8}}>Main</div><div ref={el=>roots.current.c1=el} style={{width:"100%",height:"100%"}}/></div>
-        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}><div style={{fontWeight:600,marginBottom:8}}>Stoch K/D</div><div ref={el=>roots.current.c2=el} style={{width:"100%",height:"100%"}}/></div>
-        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}><div style={{fontWeight:600,marginBottom:8}}>RSI</div><div ref={el=>roots.current.c3=el} style={{width:"100%",height:"100%"}}/></div>
-        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}><div style={{fontWeight:600,marginBottom:8}}>MACD</div><div ref={el=>roots.current.c4=el} style={{width:"100%",height:"100%"}}/></div>
-        <div style={{border:"1px solid #ddd",borderRadius:8,padding:12}}><div style={{fontWeight:600,marginBottom:8}}>Trend</div><div ref={el=>roots.current.c5=el} style={{width:"100%",height:"100%"}}/></div>
+      <div style={{display:"grid",gridTemplateRows:"repeat(5, 320px)",gap:"12px"}}>
+        <div style={{border:"1px solid #ddd",borderRadius:8,padding:8}}><div>Main</div><canvas ref={cMain} style={{width:"100%",height:"260px"}}/></div>
+        <div style={{border:"1px solid #ddd",borderRadius:8,padding:8}}><div>Stoch K/D</div><canvas ref={cStoch} style={{width:"100%",height:"260px"}}/></div>
+        <div style={{border:"1px solid #ddd",borderRadius:8,padding:8}}><div>RSI</div><canvas ref={cRSI} style={{width:"100%",height:"260px"}}/></div>
+        <div style={{border:"1px solid #ddd",borderRadius:8,padding:8}}><div>MACD</div><canvas ref={cMACD} style={{width:"100%",height:"260px"}}/></div>
+        <div style={{border:"1px solid #ddd",borderRadius:8,padding:8}}><div>Trend</div><canvas ref={cTrend} style={{width:"100%",height:"260px"}}/></div>
       </div>
     </div>
   )
