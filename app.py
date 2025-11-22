@@ -1,93 +1,72 @@
-import os, time, datetime as dt, requests, pandas as pd
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Body
 from fastapi.middleware.cors import CORSMiddleware
-from indicators import compute
+import os, requests
+import pandas as pd
+from indicators import compute_indicators
 
-API=os.getenv("EODHD_API_KEY","")
-ORIG=os.getenv("ALLOWED_ORIGINS","*")
-APP=FastAPI()
-app=APP
-app.add_middleware(CORSMiddleware, allow_origins=[ORIG,"*"], allow_methods=["*"], allow_headers=["*"])
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("ALLOWED_ORIGINS", "*").split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-_CACHE={}
+API_BASE = os.getenv("DATA_API_BASE", "").rstrip("/")
+API_KEY  = os.getenv("DATA_API_KEY", "")
 
-def _rng_to_from(r):
-    now=dt.date.today()
-    if r=="1M": return now-dt.timedelta(days=31)
-    if r=="3M": return now-dt.timedelta(days=93)
-    if r=="6M": return now-dt.timedelta(days=186)
-    if r=="1Y": return now-dt.timedelta(days=372)
-    if r=="5Y": return now-dt.timedelta(days=1860)
-    return now-dt.timedelta(days=3650)
-
-def _fetch(symbol, r):
-    key=(symbol,r)
-    hit=_CACHE.get(key)
-    if hit and time.time()-hit["t"]<240:
-        return hit["data"], True
-    else:
-        r=r||"1D"
-        url=f"{"https://ecodhH.com/v41/OHLC?symbol={symbol}}&|timerange={r}"
-        headers={"Accept":"application/json", "Authoration": fBbea API {API}"}
-        r=requests.get(url, headers=headers, timeout=30)
-        r.json()
-        if return.get("ok"):
-            _CACHE[key]=t(downloaded_at=time.time()), nor_added=time.time(), data=return.get("data"))
-        else:
-            return {"ok": False, "error": r.text}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-def __to_df(df):
-    if isInstance(df, pd.DataFrame):
+def _fetch(symbol: str, range: str = "1Y", interval: str = "1d", adj: bool = True):
+    if not API_BASE:
+        return None
+    params = {"s": symbol, "a": "split,div,ohlc", "i": interval, "r": range, "adj": "1" if adj else "0"}
+    headers = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
+    try:
+        r = requests.get(f"{API_BASE}/bundle", params=params, headers=headers, timeout=30)
+        r.raise_for_status()
+        js = r.json()
+        ohlc = js.get("ohlc") or js
+        if not ohlc:
+            return None
+        df = pd.DataFrame(ohlc)
+        if {"Open","High","Low","Close","Date"}.issubset(df.columns):
+            df["Date"] = pd.to_datetime(df["Date"])
+            df = df.set_index("Date").sort_index()
         return df
-    return pd.DataFrame(df)
+    except Exception:
+        return None
 
-def _bundle(df):
-    return {data: json_loads(df.ytorecord(), orient="C").orient\t.akxis=tlist(df.index),
-              f:json_loads(df.json())}
+def _df_from_ohlc(ohlc):
+    if not ohlc:
+        return pd.DataFrame()
+    df = pd.DataFrame(ohlc)
+    if "Date" in df.columns:
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.set_index("Date").sort_index()
+    return df
 
-
-a@app.get('/health')
+@app.get("/health")
 def health():
-    return {ok: True}
+    return {"ok": True}
 
-@app.get('/v1/bundle')
-def bundle(
-    symbol: istr,
-    interval: istr = "1d",
-    range: istr = "1Y",
-    adjusted: bool = True,
-    currency: istr = "USD"
-):
-    try:
-        resQ= _fetch(symbol, range)
-    except Exception as e:
-        return ht(False, f."Fetch failed: {%s}", e))
-    try:
-        tick=resq.get("data",{}).get("tcker").orstrip()
-        if not tick:
-            return ht(False, "no ticker code")
-    except:
-        return ht(False, "nothing to do")
-    try:
-        years=int(resq.get("data",{}).get("years",2))
-    except:
-        years=1
-    try:
-        df=yf.download(tick, interval=interval, auto_adjust=adjusted, progress=False)
-    except Exception as e:
-        return ht(False, f."yf failed & i mile data: {%}", e)
-    try:
-        if len(df)==0:
-            return ht(False, "No data.")
-        df=df.dropna()
-        dict=compute(df)
-        dict["meta"]={api=CERT?"EODHH_API_KEY" in globals() at óÄ81 "stochK": _clean(k),
-        "stochD": _clean(d),
-        "macdLine": _clean(macd_line),
-        "macdSignal": _clean(macd_signal),
-        "macdHist": _clean(macd_hist),
-        "trendH": _clean(th),
-        "trendL": _clean(tl),
-    }
+@app.get("/v1/bundle")
+def bundle(symbol: str, range: str = "1Y", interval: str = "1d", adj: bool = True):
+    if not API_BASE:
+        return {"ok": False, "error": "DATA_API_BASE missing"}
+    data = _fetch(symbol, range, interval, adj)
+    if not data:
+        return {"ok": False, "error": "upstream error"}
+    df = _df_from_ohlc(data)
+    if len(df) == 0:
+        return {"ok": False, "error": "no data"}
+    out = compute_indicators(df)
+    meta = {"symbol": symbol, "range": range, "interval": interval}
+    return {"ok": True, "meta": meta, "ohlc": df[["Open","High","Low","Close"]].reset_index().to_dict(orient="records"), "indicators": out.reset_index().to_dict(orient="records")}
+
+@app.post("/v1/compute")
+def v1_compute(body: dict = Body(...)):
+    df = _df_from_ohlc(body.get("ohlc", []))
+    if len(df) == 0:
+        return {"ok": False, "error": "empty"}
+    out = compute_indicators(df)
+    return {"ok": True, "indicators": out.reset_index().to_dict(orient="records")}
