@@ -14,44 +14,44 @@ def _rsi(close: pd.Series, n: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def _stoch_kd(close: pd.Series, high: pd.Series, low: pd.Series, n: int = 14, k: int = 3, d: int = 3):
-    ll = low.rolling(n).min()
-    hh = high.rolling(n).max()
-    raw_k = 100 * (close - ll) / (hh - ll)
-    stoch_k = raw_k.rolling(k).mean()
-    stoch_d = stoch_k.rolling(d).mean()
+def _stoch_kd(close, high, low, k=14, d=3):
+    ll = low.rolling(k, min_periods=1).min()
+    hh = high.rolling(k, min_periods=1).max()
+    raw_k = 100 * (close - ll) / (hh - ll).replace(0, np.nan)
+    stoch_k = raw_k.rolling(d, min_periods=1).mean()
+    stoch_d = stoch_k.rolling(d, min_periods=1).mean()
     return stoch_k, stoch_d
 
-def _bollinger(c: pd.Series, n: int = 20, k: float = 2.0):
-    mid = c.rolling(n).mean()
-    std = c.rolling(n).std(ddof=0)
-    up = mid + k * std
-    dn = mid - k * std
-    return mid, up, dn
+def _macd(close, fast=12, slow=26, signal=9):
+    mac_line = _ema(close, fast) - _ema(close, slow)
+    mac_sig = mac_line.ewm(span=signal, adjust=False).mean()
+    mac_hist = mac_line - mac_sig
+    return mac_line, mac_sig, mac_hist
 
-def _clean_series(s: pd.Series):
-    return s.replace([np.inf, -np.inf], np.nan).where(pd.notnull(s), None).tolist()
+def _bollinger(close, n=20, k=2.0):
+    ma = close.rolling(n, min_periods=1).mean()
+    std = close.rolling(n, min_periods=1).std(ddof=0)
+    bb_up = ma + k*std
+    bb_dn = ma - k*std
+    return ma, bb_up, bb_dn
+
+def _clean_series(s: pd.Series) -> list:
+    return pd.Series(s, dtype="float64").replace([np.inf, -np.inf], np.nan).tolist()
 
 def compute_indicators(df: pd.DataFrame) -> dict:
-    c = pd.to_numeric(df["c"], errors="coerce")
-    h = pd.to_numeric(df["h"], errors="coerce")
-    l = pd.to_numeric(df["l"], errors="coerce")
+    c = pd.Series(df["c"])
+    h = pd.Series(df["h"])
+    l = pd.Series(df["l"])
+    v = pd.Series(df["v"])
 
     ema20 = _ema(c, 20)
     ema50 = _ema(c, 50)
     rsi14 = _rsi(c, 14)
-    stochK, stochD = _stoch_kd(c, h, l, 14, 3, 3)
-
-    mac_fast = _ema(c, 12)
-    mac_slow = _ema(c, 26)
-    macLine = mac_fast - mac_slow
-    macSignal = macLine.ewm(span=9, adjust=False).mean()
-    macHist = macLine - macSignal
-
-    bbMd, bbUp, bbDn = _bollinger(c, 20, 2.0)
-
-    trendH = h.rolling(20).max()
-    trendL = l.rolling(20).min()
+    stochK, stochD = _stoch_kd(c, h, l, 14, 3)
+    macLine, macSignal, macHist = _macd(c, 12, 26, 9)
+    bbMid, bbUp, bbDn = _bollinger(c, 20, 2.0)
+    trendH = h.rolling(20, min_periods=1).max()
+    trendL = l.rolling(20, min_periods=1).min()
 
     return {
         "ema20": _clean_series(ema20),
@@ -62,7 +62,7 @@ def compute_indicators(df: pd.DataFrame) -> dict:
         "macLine": _clean_series(macLine),
         "macSignal": _clean_series(macSignal),
         "macHist": _clean_series(macHist),
-        "bbMd": _clean_series(bbMd),
+        "bbMid": _clean_series(bbMid),
         "bbUp": _clean_series(bbUp),
         "bbDn": _clean_series(bbDn),
         "trendH": _clean_series(trendH),
