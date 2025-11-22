@@ -1,86 +1,72 @@
 import numpy as np
 import pandas as pd
 
-def _ema(s: pd.Series, n: int):
-    return s.ewm(span=n, adjust=False).mean()
+def _clean(s: pd.Series):
+    x = s.astype("float64").replace([np.inf, -np.inf], np.nan)
+    x = x.round(6)
+    return [None if pd.isna(v) else float(v) for v in x.to_numpy()]
 
-def _rsi(close: pd.Series, n: int = 14):
-    d = close.diff()
-    up = d.clip(lower=0)
-    dn = (-d).clip(lower=0)
+def _ema(c: pd.Series, n: int):
+    return c.ewm(span=n, adjust=False).mean()
+
+def _rsi(c: pd.Series, n: int = 14):
+    d = c.diff()
+    up = d.clip(lower=0.0)
+    dn = (-d).clip(lower=0.0)
     roll_up = up.ewm(alpha=1/n, adjust=False).mean()
     roll_dn = dn.ewm(alpha=1/n, adjust=False).mean()
-    rs = roll_up / roll_dn.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    rs = roll_up / roll_dn
+    return 100 - (100 / (1 + rs))
 
-def _stoch_kd(close: pd.Series, high: pd.Series, low: pd.Series, k: int = 14, d: int = 3):
-    ll = low.rolling(k).min()
-    hh = high.rolling(k).max()
-    raw_k = 100 * (close - ll) / (hh - ll)
-    stochK = raw_k
-    stochD = stochK.rolling(d).mean()
-    return stochK, stochD
+def _stoch_kd(h: pd.Series, l: pd.Series, c: pd.Series, k: int = 14, smooth: int = 3, d: int = 3):
+    ll = l.rolling(k).min()
+    hh = h.rolling(k).max()
+    rawk = 100 * (c - ll) / (hh - ll).replace(0, np.nan)
+    ksm = rawk.rolling(smooth).mean()
+    dsm = ksm.rolling(d).mean()
+    return ksm, dsm
 
-def _macd(close: pd.Series, f: int = 12, s: int = 26, sig: int = 9):
-    ema_f = _ema(close, f)
-    ema_s = _ema(close, s)
-    macLine = ema_f - ema_s
-    macSignal = macLine.ewm(span=sig, adjust=False).mean()
-    macHist = macLine - macSignal
-    return macLine, macSignal, macHist
+def _macd(c: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+    emaf = _ema(c, fast)
+    emas = _ema(c, slow)
+    line = emaf - emas
+    sig = line.ewm(span=signal, adjust=False).mean()
+    hist = line - sig
+    return line, sig, hist
 
-def _bollinger(close: pd.Series, n: int = 20, k: float = 2.0):
-    mid = close.rolling(n).mean()
-    std = close.rolling(n).std(ddof=0)
+def _bollinger(c: pd.Series, n: int = 20, k: float = 2.0):
+    mid = c.rolling(n).mean()
+    std = c.rolling(n).std()
     up = mid + k * std
     dn = mid - k * std
     return mid, up, dn
 
-def _clean_list(v):
-    out = []
-    for x in v:
-        if x is None:
-            out.append(None)
-        else:
-            try:
-                if np.isinf(x) or np.isnan(x):
-                    out.append(None)
-                else:
-                    out.append(float(x))
-            except Exception:
-                out.append(None)
-    return out
-
-def _clean_series(s: pd.Series):
-    return _clean_list(s.replace([np.inf, -np.inf], np.nan).astype(float).tolist())
-
 def compute_indicators(df: pd.DataFrame) -> dict:
-    c = df["c"]
-    h = df["h"]
-    l = df["l"]
+    c = pd.Series(df["c"], dtype="float64")
+    h = pd.Series(df["h"], dtype="float64")
+    l = pd.Series(df["l"], dtype="float64")
 
     ema20 = _ema(c, 20)
     ema50 = _ema(c, 50)
     rsi14 = _rsi(c, 14)
-    stochK, stochD = _stoch_kd(c, h, l, 14, 3)
+    stochK, stochD = _stoch_kd(h, l, c, 14, 3, 3)
     macLine, macSignal, macHist = _macd(c, 12, 26, 9)
     bbMid, bbUp, bbDn = _bollinger(c, 20, 2.0)
     trendH = h.rolling(20).max()
     trendL = l.rolling(20).min()
 
     return {
-        "ema20": _clean_series(ema20),
-        "ema50": _clean_series(ema50),
-        "rsi": _clean_series(rsi14),
-        "stochK": _clean_series(stochK),
-        "stochD": _clean_series(stochD),
-        "macLine": _clean_series(macLine),
-        "macSignal": _clean_series(macSignal),
-        "macHist": _clean_series(macHist),
-        "bbMid": _clean_series(bbMid),
-        "bbUp": _clean_series(bbUp),
-        "bbDn": _clean_series(bbDn),
-        "trendH": _clean_series(trendH),
-        "trendL": _clean_series(trendL),
+        "ema20": _clean(ema20),
+        "ema50": _clean(ema50),
+        "rsi": _clean(rsi14),
+        "stochK": _clean(stochK),
+        "stochD": _clean(stochD),
+        "macLine": _clean(macLine),
+        "macSignal": _clean(macSignal),
+        "macHist": _clean(macHist),
+        "bbMid": _clean(bbMid),
+        "bbUp": _clean(bbUp),
+        "bbDn": _clean(bbDn),
+        "trendH": _clean(trendH),
+        "trendL": _clean(trendL),
     }
