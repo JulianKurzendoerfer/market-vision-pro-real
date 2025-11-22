@@ -1,14 +1,13 @@
 import os, json
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+import httpx
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
-from urllib.request import urlopen, Request
-from urllib.error import HTTPError, URLError
-from urllib.parse import quote
-from .indicators import compute_indicators
+from pydantic import BaseModel
+from backend.indicators import compute_indicators
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -16,61 +15,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 DATA_API_BASE = os.getenv("DATA_API_BASE", "").rstrip("/")
 DATA_API_KEY = os.getenv("DATA_API_KEY", "")
 
-def _fetch_json(url: str) -> dict:
-    headers = {"User-Agent": "mvp-backend/1.0"}
-    if DATA_API_KEY:
-        headers["X-API-KEY"] = DATA_API_KEY
-    try:
-        with urlopen(Request(url, headers=headers), timeout=25) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except HTTPError as e:
-        return {"ok": False, "error": f"http:{e.code}"}
-    except URLError as e:
-        return {"ok": False, "error": f"net:{getattr(e, 'reason', 'err')}"}
-    except Exception as e:
-        return {"ok": False, "error": f"err:{e}"}
-
-def _to_df(d: dict) -> pd.DataFrame:
-    t = d.get("t", [])
-    o = d.get("o", [])
-    h = d.get("h", [])
-    l = d.get("l", [])
-    c = d.get("c", [])
-    v = d.get("v", [])
-    df = pd.DataFrame({"t": t, "o": o, "h": h, "l": l, "c": c, "v": v})
-    return df
-
-def _bundle_response(df: pd.DataFrame) -> dict:
-    inds = compute_indicators({"c": df["c"], "h": df["h"], "l": df["l"]})
-    out = {
-        "ok": True,
-        "asof": datetime.now(timezone.utc).isoformat(),
-        "t": df.get("t", pd.Series([], dtype="float64")).astype("int64").tolist() if "t" in df else [],
-        "o": pd.Series(df.get("o", []), dtype="float64").replace([np.inf, -np.inf], np.nan).tolist(),
-        "h": pd.Series(df.get("h", []), dtype="float64").replace([np.inf, -np.inf], np.nan).tolist(),
-        "l": pd.Series(df.get("l", []), dtype="float64").replace([np.inf, -np.inf], np.nan).tolist(),
-        "c": pd.Series(df.get("c", []), dtype="float64").replace([np.inf, -np.inf], np.nan).tolist(),
-        "v": pd.Series(df.get("v", []), dtype="float64").replace([np.inf, -np.inf], np.nan).tolist(),
-        "indicators": inds,
-    }
-    return out
-
-@app.get("/health")
-def health():
-    return {"ok": True, "asof": datetime.now(timezone.utc).isoformat()}
-
-@app.get("/v1/bundle")
-def v1_bundle(symbol: str = Query(...), range: str = Query(...)):
-    if not DATA_API_BASE:
-        return {"ok": False, "error": "DATA_API_BASE not set"}
-    url = f"{DATA_API_BASE}/v1/bundle?symbol={quote(symbol)}&range={quote(range)}"
-    up = _fetch_json(url)
-    if not up or ("t" not in up and not up.get("ok", False)):
-        return {"ok": False, "error": f"upstream {up.get('error','invalid') if isinstance(up,dict) else 'invalid'}"}
-    df = _to_df(up if isinstance(up, dict) else {})
-    return _bundle_response(df)
-
-class OhlcIn(Body):
+class OhlcIn(BaseModel):
     t: Optional[List[int]] = None
     o: List[float]
     h: List[float]
@@ -78,9 +23,62 @@ class OhlcIn(Body):
     c: List[float]
     v: Optional[List[float]] = None
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+async def _get_json(url: str) -> Dict[str, Any]:
+    headers = {"User-Agent": "mvp-backend/1.0"}
+    if DATA_API_KEY:
+        headers["X-API-KEY"] = DATA_API_KEY
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(url, headers=headers)
+    if r.status_code != 200:
+        return {"ok": False, "error": f"http {r.status_code}"}
+    try:
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def _to_df(d: Dict[str, Any]) -> pd.DataFrame:
+    cols = {k: d.get(k, []) for k in ("t","o","h","l","c","v")}
+    df = pd.DataFrame(cols)
+    if "t" in df.columns and len(df["t"]) and df["t"].max() < 1e12:
+        df["t"] = (df["t"].astype("int64") * 1000).astype("int64")
+    return df
+
+def _bundle(df: pd.DataFrame) -> Dict[str, Any]:
+    inds = compute_indicators(df.copy())
+    out = {
+        "ok": True,
+        "asof": _now(),
+        "t": df["t"].astype("int64").tolist() if "t" in df else [],
+        "o": pd.Series(df["o"], dtype="float64").tolist(),
+        "h": pd.Series(df["h"], dtype="float64").tolist(),
+        "l": pd.Series(df["l"], dtype="float64").tolist(),
+        "c": pd.Series(df["c"], dtype="float64").tolist(),
+        "v": pd.Series(df["v"], dtype="float64").tolist() if "v" in df else [],
+        "indicators": inds,
+    }
+    return out
+
+@app.get("/health")
+def health():
+    return {"ok": True, "asof": _now()}
+
+@app.get("/v1/bundle")
+async def v1_bundle(symbol: str = Query(...), range: str = Query(...)):
+    if not DATA_API_BASE:
+        return {"ok": False, "error": "DATA_API_BASE not set"}
+    from urllib.parse import quote
+    url = f"{DATA_API_BASE}/v1/bundle?symbol={quote(symbol)}&range={quote(range)}"
+    up = await _get_json(url)
+    if not up or not up.get("t"):
+        return {"ok": False, "error": f"upstream {up.get('error') if isinstance(up,dict) else 'empty'}"}
+    df = _to_df(up)
+    return _bundle(df)
+
 @app.post("/v1/compute")
-def v1_compute(body: dict = Body(...)):
-    d = body
+def v1_compute(body: Dict = Body(...)):
+    d = {k: body.get(k, []) for k in ("t","o","h","l","c","v")}
     df = _to_df(d)
-    inds = compute_indicators({"c": df["c"], "h": df["h"], "l": df["l"]})
-    return {"ok": True, "asof": datetime.now(timezone.utc).isoformat(), "indicators": inds}
+    return _bundle(df)
