@@ -1,56 +1,56 @@
-import os, json
+import os
 from datetime import datetime, timezone
-from typing import Dict, Optional, List
-import numpy as np
+from typing import Dict, List, Optional
 import pandas as pd
 import httpx
 from fastapi import FastAPI, Query, Body
-from pydantic import BaseModel
+
 from backend.indicators import compute_indicators
 
 app = FastAPI()
-DATA_API_BASE = os.getenv("DATA_API_BASE","").rstrip("/")
-DATA_API_KEY = os.getenv("DATA_API_KEY","")
 
-class OhlcIn(BaseModel):
-    t: Optional[List[int]] = None
-    o: List[float]
-    h: List[float]
-    l: List[float]
-    c: List[float]
-    v: Optional[List[float]] = None
+DATA_API_BASE = os.getenv("DATA_API_BASE", "").rstrip("/")
+DATA_API_KEY = os.getenv("DATA_API_KEY", "")
 
 def _to_df(d: Dict) -> pd.DataFrame:
-    cols = ["t","o","h","l","c","v"]
-    data = {k: d.get(k, []) for k in cols}
-    df = pd.DataFrame(data)
-    if "t" in df and not df["t"].empty:
-        df["t"] = pd.to_datetime(df["t"], unit="ms", utc=True, errors="coerce")
+    t = d.get("t", [])
+    unit = "ms" if (max(t) if t else 0) > 10**12 else "s"
+    ts = pd.to_datetime(t, unit=unit)
+    df = pd.DataFrame({
+        "t": ts,
+        "o": d.get("o", []),
+        "h": d.get("h", []),
+        "l": d.get("l", []),
+        "c": d.get("c", []),
+        "v": d.get("v", []),
+    })
     return df
 
-def _clean(s: pd.Series) -> list:
-    return s.astype("float64").replace([np.inf, -np.inf], np.nan).where(~s.isna(), np.nan).replace({np.nan: None}).tolist()
-
-def _bundle(df: pd.DataFrame, meta: Dict = None) -> Dict:
+def _bundle(df: pd.DataFrame) -> Dict:
+    inds = compute_indicators(df.rename(columns={"t":"time"}))
     out = {
         "ok": True,
         "asof": datetime.now(timezone.utc).isoformat(),
-        "t": [int(x.timestamp()*1000) for x in df.get("t", pd.Series([], dtype="datetime64[ns, UTC]")).fillna(pd.NaT)],
-        "o": _clean(df.get("o", pd.Series([], dtype="float64"))),
-        "h": _clean(df.get("h", pd.Series([], dtype="float64"))),
-        "l": _clean(df.get("l", pd.Series([], dtype="float64"))),
-        "c": _clean(df.get("c", pd.Series([], dtype="float64"))),
-        "v": _clean(df.get("v", pd.Series([], dtype="float64"))),
-        "indicators": compute_indicators(df[["o","h","l","c","v"]].copy() if not df.empty else pd.DataFrame(columns=["o","h","l","c","v"])),
-        "meta": meta or {},
+        "t": [int(x.timestamp()*1000) for x in df["t"]],
+        "o": pd.Series(df["o"], dtype="float64").replace([pd.NA], 0).tolist(),
+        "h": pd.Series(df["h"], dtype="float64").replace([pd.NA], 0).tolist(),
+        "l": pd.Series(df["l"], dtype="float64").replace([pd.NA], 0).tolist(),
+        "c": pd.Series(df["c"], dtype="float64").replace([pd.NA], 0).tolist(),
+        "v": pd.Series(df["v"], dtype="float64").replace([pd.NA], 0).tolist(),
+        "indicators": inds,
     }
     return out
+
+@app.get("/health")
+def health():
+    return {"ok": True, "asof": datetime.now(timezone.utc).isoformat()}
 
 async def _fetch_json(url: str) -> Dict:
     headers = {"User-Agent": "mvp-backend/1.0"}
     if DATA_API_KEY:
         headers["X-API-KEY"] = DATA_API_KEY
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    timeout = httpx.Timeout(20.0, connect=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
         r = await client.get(url, headers=headers)
         if r.status_code != 200:
             return {"ok": False, "error": f"http {r.status_code}"}
@@ -58,10 +58,6 @@ async def _fetch_json(url: str) -> Dict:
             return r.json()
         except Exception as e:
             return {"ok": False, "error": str(e)}
-
-@app.get("/health")
-def health():
-    return {"ok": True, "asof": datetime.now(timezone.utc).isoformat()}
 
 @app.get("/v1/bundle")
 async def v1_bundle(symbol: str = Query(...), range: str = Query(...)):
@@ -71,12 +67,16 @@ async def v1_bundle(symbol: str = Query(...), range: str = Query(...)):
     url = f"{DATA_API_BASE}/v1/bundle?symbol={quote(symbol)}&range={quote(range)}"
     up = await _fetch_json(url)
     if not isinstance(up, dict) or not up.get("ok"):
-        return {"ok": False, "error": f"upstream {up.get('error') if isinstance(up, dict) else 'error'}"}
+        return {"ok": False, "error": f"upstream {up.get('error') if isinstance(up,dict) else 'empty'}"}
     df = _to_df(up)
-    return _bundle(df, up.get("meta", {}))
+    out = _bundle(df)
+    out["meta"] = up.get("meta", {})
+    return out
 
 @app.post("/v1/compute")
-def v1_compute(body: OhlcIn = Body(...)):
-    d = body.model_dump()
+def v1_compute(body: Dict = Body(...)):
+    d = body
     df = _to_df(d)
+    if df.empty:
+        return {"ok": False, "error": "empty"}
     return _bundle(df)
