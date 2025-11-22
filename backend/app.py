@@ -1,80 +1,77 @@
 import os, json
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, Any, Optional
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, Query, Body
-from pydantic import BaseModel
+from fastapi import FastAPI, Body, Query
+from fastapi.middleware.cors import CORSMiddleware
 
-from backend.indicators import compute_indicators
+from .indicators import compute_indicators
 
-app = FastAPI()
+APP = FastAPI()
+APP.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 DATA_API_BASE = os.getenv("DATA_API_BASE", "").rstrip("/")
-DATA_API_KEY = os.getenv("DATA_API_KEY", "")
+DATA_API_KEY: Optional[str] = os.getenv("DATA_API_KEY", None)
 
-class OHLCIn(BaseModel):
-    t: Optional[List[int]] = None
-    o: Optional[List[float]] = None
-    h: Optional[List[float]] = None
-    l: Optional[List[float]] = None
-    c: Optional[List[float]] = None
-    v: Optional[List[float]] = None
+def _clean_list(x: pd.Series) -> list:
+    return x.astype("float64").where(pd.notna(x), None).tolist()
 
-def _to_df(d: Dict) -> pd.DataFrame:
+def _to_df(d: Dict[str, Any]) -> pd.DataFrame:
     t = d.get("t", [])
-    o = d.get("o", [])
-    h = d.get("h", [])
-    l = d.get("l", [])
-    c = d.get("c", [])
-    v = d.get("v", [])
-    if len(t) == 0:
-        return pd.DataFrame(columns=list("tohlcv"))
-    ts = pd.Series(t)
-    if ts.max() < 10**12:
-        ts = ts * 1000
+    unit = "ms" if (len(t) and t[0] > 10**12) else "s"
+    ts = pd.to_datetime(t, unit=unit)
     df = pd.DataFrame({
-        "t": pd.to_datetime(ts, unit="ms"),
-        "o": o, "h": h, "l": l, "c": c, "v": v
+        "t": ts,
+        "o": pd.Series(d.get("o", []), dtype="float64"),
+        "h": pd.Series(d.get("h", []), dtype="float64"),
+        "l": pd.Series(d.get("l", []), dtype="float64"),
+        "c": pd.Series(d.get("c", []), dtype="float64"),
+        "v": pd.Series(d.get("v", []), dtype="float64"),
     })
-    df = df.dropna(subset=["c"]).reset_index(drop=True)
     return df
 
-def _fetch_json(url: str) -> Dict:
+def _bundle(df: pd.DataFrame, meta: Optional[dict]=None) -> Dict[str, Any]:
+    inds = compute_indicators(df.copy())
+    out = {
+        "ok": True,
+        "asof": datetime.now(timezone.utc).isoformat(),
+        "t": (df["t"].astype("int64")//10**6).tolist(),
+        "o": _clean_list(df["o"]),
+        "h": _clean_list(df["h"]),
+        "l": _clean_list(df["l"]),
+        "c": _clean_list(df["c"]),
+        "v": _clean_list(df["v"]),
+        "indicators": inds,
+    }
+    if meta is not None:
+        out["meta"] = meta
+    return out
+
+def _fetch_json(url: str) -> Dict[str, Any]:
     headers = {"User-Agent": "mvp-backend/1.0"}
     if DATA_API_KEY:
         headers["X-API-KEY"] = DATA_API_KEY
     req = Request(url, headers=headers)
     try:
         with urlopen(req, timeout=20) as resp:
-            data = resp.read().decode("utf-8")
-            return json.loads(data)
+            return json.loads(resp.read().decode("utf-8"))
+    except HTTPError as e:
+        return {"ok": False, "error": f"http {e.code}"}
+    except URLError as e:
+        return {"ok": False, "error": f"net {e.reason}"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-def _bundle(df: pd.DataFrame) -> Dict:
-    inds = compute_indicators(df.copy())
-    out = {
-        "ok": True,
-        "asof": datetime.now(timezone.utc).isoformat(),
-        "t": [int(x.timestamp()*1000) for x in df["t"]] if "t" in df else [],
-        "o": pd.Series(df.get("o", [])).astype("float64").replace([np.inf,-np.inf], np.nan).where(pd.notna(df.get("o", [])), None).tolist() if "o" in df else [],
-        "h": pd.Series(df.get("h", [])).astype("float64").replace([np.inf,-np.inf], np.nan).where(pd.notna(df.get("h", [])), None).tolist() if "h" in df else [],
-        "l": pd.Series(df.get("l", [])).astype("float64").replace([np.inf,-np.inf], np.nan).where(pd.notna(df.get("l", [])), None).tolist() if "l" in df else [],
-        "c": pd.Series(df.get("c", [])).astype("float64").replace([np.inf,-np.inf], np.nan).where(pd.notna(df.get("c", [])), None).tolist() if "c" in df else [],
-        "v": pd.Series(df.get("v", [])).astype("float64").replace([np.inf,-np.inf], np.nan).where(pd.notna(df.get("v", [])), None).tolist() if "v" in df else [],
-        "indicators": inds
-    }
-    return out
-
-@app.get("/health")
+@APP.get("/health")
 def health():
     return {"ok": True, "asof": datetime.now(timezone.utc).isoformat()}
 
-@app.get("/v1/bundle")
-def v1_bundle(symbol: str = Query(...), range: str = Query(...)):
+@APP.get("/v1/bundle")
+async def v1_bundle(symbol: str = Query(...), range: str = Query(...)):
     if not DATA_API_BASE:
         return {"ok": False, "error": "DATA_API_BASE not set"}
     url = f"{DATA_API_BASE}/v1/bundle?symbol={symbol}&range={range}"
@@ -82,12 +79,14 @@ def v1_bundle(symbol: str = Query(...), range: str = Query(...)):
     if not isinstance(up, dict) or not up.get("t"):
         return {"ok": False, "error": f"upstream {up.get('error') if isinstance(up,dict) else 'empty'}"}
     df = _to_df(up)
-    return _bundle(df)
+    return _bundle(df, up.get("meta", {}))
 
-@app.post("/v1/compute")
-def v1_compute(body: OHLCIn = Body(...)):
-    d = body.model_dump()
+@APP.post("/v1/compute")
+def v1_compute(body: Dict = Body(...)):
+    d = {k: body.get(k, []) for k in ("t","o","h","l","c","v")}
     df = _to_df(d)
     if df.empty:
         return {"ok": False, "error": "empty"}
     return _bundle(df)
+    
+app = APP
