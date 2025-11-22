@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from indicators import compute_indicators
+from backend.indicators import compute_indicators
 
 app = FastAPI()
 
