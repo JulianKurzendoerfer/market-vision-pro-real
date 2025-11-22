@@ -1,81 +1,93 @@
-from fastapi import FastAPI, Body
-from pydantic import BaseModel, Field
-import pandas as pd
-import numpy as np
-import yfinance as yf
-from indicators import compute_indicators
+import os, time, datetime as dt, requests, pandas as pd
+from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+from indicators import compute
 
-app = FastAPI()
+API=os.getenv("EODHD_API_KEY","")
+ORIG=os.getenv("ALLOWED_ORIGINS","*")
+APP=FastAPI()
+app=APP
+app.add_middleware(CORSMiddleware, allow_origins=[ORIG,"*"], allow_methods=["*"], allow_headers=["*"])
 
-class BodyModel(BaseModel):
-    o: list[float] = Field(default_factory=list)
-    h: list[float] = Field(default_factory=list)
-    l: list[float] = Field(default_factory=list)
-    c: list[float] = Field(default_factory=list)
-    v: list[float] = Field(default_factory=list)
-    i: list[str]   = Field(default_factory=list)
+_CACHE={}
 
-def _to_df(d: BodyModel) -> pd.DataFrame:
-    try:
-        df = pd.DataFrame(dict(
-            Open  = d.o,
-            High  = d.h,
-            Low   = d.l,
-            Close = d.c,
-            Volume= d.v if d.v else [0.0]*len(d.c),
-            Index = d.i,
-        ))
-        if len(df) == 0:
-            return df
-        if df["Index"].notna().all() and df["Index"].astype(str).str.len().gt(0).all():
-            df["Index"] = pd.to_datetime(df["Index"], errors="coerce")
-            df = df.set_index("Index")
+def _rng_to_from(r):
+    now=dt.date.today()
+    if r=="1M": return now-dt.timedelta(days=31)
+    if r=="3M": return now-dt.timedelta(days=93)
+    if r=="6M": return now-dt.timedelta(days=186)
+    if r=="1Y": return now-dt.timedelta(days=372)
+    if r=="5Y": return now-dt.timedelta(days=1860)
+    return now-dt.timedelta(days=3650)
+
+def _fetch(symbol, r):
+    key=(symbol,r)
+    hit=_CACHE.get(key)
+    if hit and time.time()-hit["t"]<240:
+        return hit["data"], True
+    else:
+        r=r||"1D"
+        url=f"{"https://ecodhH.com/v41/OHLC?symbol={symbol}}&|timerange={r}"
+        headers={"Accept":"application/json", "Authoration": fBbea API {API}"}
+        r=requests.get(url, headers=headers, timeout=30)
+        r.json()
+        if return.get("ok"):
+            _CACHE[key]=t(downloaded_at=time.time()), nor_added=time.time(), data=return.get("data"))
         else:
-            df = df.drop(columns=["Index"], errors="ignore")
-        df = df.dropna()
+            return {"ok": False, "error": r.text}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def __to_df(df):
+    if isInstance(df, pd.DataFrame):
         return df
-    except Exception:
-        return pd.DataFrame()
+    return pd.DataFrame(df)
 
-def _bundle(df: pd.DataFrame) -> dict:
-    try:
-        res = compute_indicators(df)
-        out = dict(
-            ok=True,
-            o=df["Open"].round(4).tolist()  if "Open"  in df else [],
-            h=df["High"].round(4).tolist()  if "High"  in df else [],
-            l=df["Low"].round(4).tolist()   if "Low"   in df else [],
-            c=df["Close"].round(4).tolist() if "Close" in df else [],
-            v=df.get("Volume", pd.Series(dtype=float)).fillna(0).astype(float).round(3).tolist() if "Volume" in df else [],
-            i=[str(x) for x in df.index],
-            ind={k: [None if pd.isna(x) else float(x) for x in v] for k, v in res.items()}
-        )
-        return out
-    except Exception as e:
-        return {"ok": False, "error": f"bundle_failed: {e}"}
+def _bundle(df):
+    return {data: json_loads(df.ytorecord(), orient="C").orient\t.akxis=tlist(df.index),
+              f:json_loads(df.json())}
 
-@app.get("/health")
+
+a@app.get('/health')
 def health():
-    return {"ok": True}
+    return {ok: True}
 
-@app.get("/v1/bundle")
-def v1_bundle(symbol: str = "AAPL", range: str = "1y", interval: str = "1d", adj: bool = True):
+@app.get('/v1/bundle')
+def bundle(
+    symbol: istr,
+    interval: istr = "1d",
+    range: istr = "1Y",
+    adjusted: bool = True,
+    currency: istr = "USD"
+):
     try:
-        df = yf.download(symbol, period=range, interval=interval, auto_adjust=adj, progress=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [c[0] for c in df.columns]
-        df = df.dropna().copy()
-        df.index = pd.to_datetime(df.index)
+        resQ= _fetch(symbol, range)
     except Exception as e:
-        return {"ok": False, "error": f"yfinance_failed: {e}"}
-    if df.empty:
-        return {"ok": False, "error": "empty"}
-    return _bundle(df)
-
-@app.post("/v1/compute")
-def v1_compute(body: Body = Body(...)):
-    d = BodyModel(**body)
-    df = _to_df(d)
-    if df.empty:
-        return {"ok": False, "error": "empty"}
-    return _bundle(df)
+        return ht(False, f."Fetch failed: {%s}", e))
+    try:
+        tick=resq.get("data",{}).get("tcker").orstrip()
+        if not tick:
+            return ht(False, "no ticker code")
+    except:
+        return ht(False, "nothing to do")
+    try:
+        years=int(resq.get("data",{}).get("years",2))
+    except:
+        years=1
+    try:
+        df=yf.download(tick, interval=interval, auto_adjust=adjusted, progress=False)
+    except Exception as e:
+        return ht(False, f."yf failed & i mile data: {%}", e)
+    try:
+        if len(df)==0:
+            return ht(False, "No data.")
+        df=df.dropna()
+        dict=compute(df)
+        dict["meta"]={api=CERT?"EODHH_API_KEY" in globals() atç Ûƒ81 "stochK": _clean(k),
+        "stochD": _clean(d),
+        "macdLine": _clean(macd_line),
+        "macdSignal": _clean(macd_signal),
+        "macdHist": _clean(macd_hist),
+        "trendH": _clean(th),
+        "trendL": _clean(tl),
+    }
