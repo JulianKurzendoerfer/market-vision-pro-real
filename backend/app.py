@@ -1,101 +1,102 @@
-import os, json
-from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
-from urllib.request import Request, urlopen
-from urllib.error import HTTPError, URLError
-from urllib.parse import quote
-
-import numpy as np
+import os, json, math, datetime as dt
 import pandas as pd
+import numpy as np
+import requests
 from fastapi import FastAPI, Query, Body
-from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+from .indicators import compute_indicators
 
-from backend.indicators import compute_indicators
+API_BASE = os.environ.get("DATA_API_BASE", "https://eodhd.com/api")
+API_KEY = os.environ.get("DATA_API_KEY", "")
 
-APP = FastAPI()
+app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-DATA_API_BASE = os.getenv("DATA_API_BASE","").rstrip("/")
-DATA_API_KEY  = os.getenv("DATA_API_KEY","")
+def _clean(v):
+    if isinstance(v, (pd.Series, np.ndarray, list)):
+        arr = pd.Series(v).astype(float).replace([np.inf, -np.inf], np.nan).tolist()
+        return [None if (not isinstance(x,(int,float)) or not math.isfinite(x)) else float(x) for x in arr]
+    if v is None: return None
+    try:
+        x = float(v)
+        return None if not math.isfinite(x) else x
+    except: return None
 
-class OHLCIn(BaseModel):
-    t: Optional[List[int]] = None
-    o: List[float]
-    h: List[float]
-    l: List[float]
-    c: List[float]
-    v: Optional[List[float]] = None
-
-def _clean_list(s: pd.Series) -> list:
-    return [None if pd.isna(x) else float(x) for x in s]
-
-def _to_df(d: Dict[str, Any]) -> pd.DataFrame:
-    df = pd.DataFrame({
-        "t": d.get("t", []),
-        "o": d.get("o", []),
-        "h": d.get("h", []),
-        "l": d.get("l", []),
-        "c": d.get("c", []),
-        "v": d.get("v", []),
-    })
-    # Ensure numeric dtype
-    for col in ["o","h","l","c","v"]:
-        if col in df:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+def _to_df(payload):
+    t = payload.get("t", [])
+    o = payload.get("o", [])
+    h = payload.get("h", [])
+    l = payload.get("l", [])
+    c = payload.get("c", [])
+    v = payload.get("v", [])
+    if not (len(t)==len(o)==len(h)==len(l)==len(c)>0): return None
+    idx = pd.to_datetime(t)
+    df = pd.DataFrame({"Open":o,"High":h,"Low":l,"Close":c,"Volume":v if len(v)==len(c) else [None]*len(c)}, index=idx).dropna()
     return df
 
-def _bundle(df: pd.DataFrame) -> Dict[str, Any]:
-    inds = compute_indicators(df.copy())
+def _bundle(df, tp):
+    ind, trend = df, tp
     out = {
-        "ok": True,
-        "asof": datetime.now(timezone.utc).isoformat(),
-        "t": df.get("t", pd.Series([], dtype="int64")).astype("Int64").tolist() if "t" in df else [],
-        "o": _clean_list(df["o"]) if "o" in df else [],
-        "h": _clean_list(df["h"]) if "h" in df else [],
-        "l": _clean_list(df["l"]) if "l" in df else [],
-        "c": _clean_list(df["c"]) if "c" in df else [],
-        "v": _clean_list(df["v"]) if "v" in df else [],
-        "indicators": inds,
+        "t": [x.isoformat() for x in ind.index.to_pydatetime()],
+        "o": _clean(ind["Open"]), "h": _clean(ind["High"]), "l": _clean(ind["Low"]), "c": _clean(ind["Close"]), "v": _clean(ind.get("Volume", [])),
+        "ind": {
+            "ema9": _clean(ind["EMA9"]), "ema21": _clean(ind["EMA21"]), "ema50": _clean(ind["EMA50"]), "ema100": _clean(ind["EMA100"]), "ema200": _clean(ind["EMA200"]),
+            "bb_mid": _clean(ind["BB_mid"]), "bb_upper": _clean(ind["BB_upper"]), "bb_lower": _clean(ind["BB_lower"]),
+            "atr20": _clean(ind["ATR20"]), "kc_upper": _clean(ind["KC_upper"]), "kc_lower": _clean(ind["KC_lower"]),
+            "rsi14": _clean(ind["RSI14"]), "macd": _clean(ind["MACD"]), "macds": _clean(ind["MACDS"]), "macdh": _clean(ind["MACDH"]),
+            "stochK": _clean(ind["STOCHK"]), "stochD": _clean(ind["STOCHD"]), "psar": _clean(ind["PSAR"]),
+            "trend_low_idx": list(map(int, trend["lows"])) if trend["lows"].size else [],
+            "trend_high_idx": list(map(int, trend["highs"])) if trend["highs"].size else [],
+            "trend_levels": _clean(trend["levels"]), "trend_counts": _clean(trend["counts"]), "trend_strength": _clean(trend["strength"]),
+            "close": _clean(ind["Close"]),
+        }
     }
-    return out
+    return {"ok": True, "data": out}
 
-def _fetch_json(url: str) -> Dict[str, Any]:
-    headers = {"User-Agent": "mvp-backend/1.0"}
-    if DATA_API_KEY:
-        headers["X-API-KEY"] = DATA_API_KEY
-    req = Request(url, headers=headers)
-    try:
-        with urlopen(req, timeout=20) as resp:
-            if resp.status != 200:
-                return {"ok": False, "error": f"http {resp.status}"}
-            return json.loads(resp.read().decode("utf-8"))
-    except HTTPError as e:
-        return {"ok": False, "error": f"http {e.code}"}
-    except URLError as e:
-        return {"ok": False, "error": f"net {e.reason}"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+def _eodhd_download(symbol, interval, years):
+    end = pd.Timestamp.utcnow().normalize()
+    start = end - pd.DateOffset(years=int(years))
+    if interval == "1h":
+        url = f"{API_BASE}/intraday/{symbol}"
+        params = {"from": start.strftime("%Y-%m-%d"), "to": end.strftime("%Y-%m-%d"), "interval": "60m", "api_token": API_KEY, "fmt": "json"}
+    elif interval == "1wk":
+        url = f"{API_BASE}/eod/{symbol}"
+        params = {"from": start.strftime("%Y-%m-%d"), "to": end.strftime("%Y-%m-%d"), "period": "w", "api_token": API_KEY, "fmt": "json"}
+    else:
+        url = f"{API_BASE}/eod/{symbol}"
+        params = {"from": start.strftime("%Y-%m-%d"), "to": end.strftime("%Y-%m-%d"), "period": "d", "api_token": API_KEY, "fmt": "json"}
+    r = requests.get(url, params=params, timeout=20)
+    if r.status_code != 200: return None, f"http {r.status_code}"
+    js = r.json()
+    if not isinstance(js, list) or not js: return None, "empty"
+    recs = []
+    for row in js:
+        t = row.get("date") or row.get("datetime") or row.get("timestamp")
+        if isinstance(t, (int,float)): ts = pd.to_datetime(int(t), unit="s")
+        else: ts = pd.to_datetime(str(t))
+        recs.append([ts, float(row.get("open", np.nan)), float(row.get("high", np.nan)), float(row.get("low", np.nan)), float(row.get("close", np.nan)), float(row.get("volume", 0))])
+    df = pd.DataFrame(recs, columns=["time","Open","High","Low","Close","Volume"]).dropna()
+    df = df.set_index("time").sort_index()
+    if interval=="1h":
+        now = pd.Timestamp.utcnow().tz_localize(None)
+        step = pd.Timedelta(hours=1)
+        if len(df) and (now - df.index[-1].to_pydatetime()) < step: df = df.iloc[:-1]
+    return df, None
 
-@APP.get("/health")
+@app.get("/health")
 def health():
-    return {"ok": True, "asof": datetime.now(timezone.utc).isoformat()}
+    return {"ok": True, "asof": pd.Timestamp.utcnow().isoformat()}
 
-@APP.get("/v1/bundle")
-def v1_bundle(symbol: str = Query(...), range: str = Query(...)):
-    if not DATA_API_BASE:
-        return {"ok": False, "error": "DATA_API_BASE not set"}
-    url = f"{DATA_API_BASE}/v1/bundle?symbol={quote(symbol)}&range={quote(range)}"
-    up = _fetch_json(url)
-    if not isinstance(up, dict) or not up.get("ok"):
-        return {"ok": False, "error": f"upstream {up.get('error') if isinstance(up, dict) else 'empty'}"}
-    df = _to_df(up)
-    if df.empty or not all(c in df for c in ["o","h","l","c"]):
-        return {"ok": False, "error": "empty"}
-    return _bundle(df)
+@app.get("/v1/bundle")
+def v1_bundle(symbol: str = Query(...), years: int = Query(1, ge=1, le=10), interval: str = Query("1d")):
+    df, err = _eodhd_download(symbol.strip(), interval.strip(), years)
+    if df is None: return {"ok": False, "error": err or "fetch_failed"}
+    ind, tp = compute_indicators(df)
+    return _bundle(ind, tp)
 
-@APP.post("/v1/compute")
-def v1_compute(body: OHLCIn = Body(...)):
-    d = body.model_dump()
-    df = _to_df(d)
-    if df.empty or not all(c in df for c in ["o","h","l","c"]):
-        return {"ok": False, "error": "empty"}
-    return _bundle(df)
+@app.post("/v1/compute")
+def v1_compute(body: dict = Body(...)):
+    df = _to_df(body)
+    if df is None or df.empty: return {"ok": False, "error": "bad_input"}
+    ind, tp = compute_indicators(df)
+    return _bundle(ind, tp)
