@@ -1,89 +1,63 @@
 import os, json
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, Query, Body
-from pydantic import BaseModel
-from urllib.request import Request, urlopen
+from fastapi.middleware.cors import CORSMiddleware
+from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from backend.indicators import compute_indicators
+from .indicators import compute_indicators
 
 app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 DATA_API_BASE = os.getenv("DATA_API_BASE", "").rstrip("/")
 DATA_API_KEY = os.getenv("DATA_API_KEY", "")
-
-class OhlcvIn(BaseModel):
-    t: List[int]
-    o: List[float]
-    h: List[float]
-    l: List[float]
-    c: List[float]
-    v: List[float]
-
-def _to_df(d: dict) -> pd.DataFrame:
-    t = d.get("t", [])
-    unit = "ms" if (t and max(t) > 10**11) else "s"
-    ts = pd.to_datetime(t, unit=unit, utc=True)
-    def f(x):
-        try:
-            return float(x)
-        except Exception:
-            return np.nan
-    return pd.DataFrame({
-        "t": ts,
-        "o": [f(x) for x in d.get("o", [])],
-        "h": [f(x) for x in d.get("h", [])],
-        "l": [f(x) for x in d.get("l", [])],
-        "c": [f(x) for x in d.get("c", [])],
-        "v": [f(x) for x in d.get("v", [])],
-    })
 
 def _fetch_json(url: str) -> dict:
     headers = {"User-Agent": "mvp-backend/1.0"}
     if DATA_API_KEY:
         headers["X-API-KEY"] = DATA_API_KEY
-    req = Request(url, headers=headers)
     try:
-        with urlopen(req, timeout=20) as resp:
+        with urlopen(Request(url, headers=headers), timeout=25) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except HTTPError as e:
-        return {"ok": False, "error": f"http {e.code}"}
+        return {"ok": False, "error": f"http:{e.code}"}
     except URLError as e:
-        return {"ok": False, "error": f"net {e.reason}"}
+        return {"ok": False, "error": f"net:{getattr(e, 'reason', 'err')}"}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": f"err:{e}"}
 
-def _clean_list(s: pd.Series):
-    out = []
-    a = s.to_numpy(dtype=float, copy=False)
-    for x in a:
-        if x is None or np.isnan(x) or np.isinf(x):
-            out.append(None)
-        else:
-            out.append(float(x))
+def _to_df(d: dict) -> pd.DataFrame:
+    t = d.get("t", [])
+    o = d.get("o", [])
+    h = d.get("h", [])
+    l = d.get("l", [])
+    c = d.get("c", [])
+    v = d.get("v", [])
+    df = pd.DataFrame({"t": t, "o": o, "h": h, "l": l, "c": c, "v": v})
+    return df
+
+def _bundle_response(df: pd.DataFrame) -> dict:
+    inds = compute_indicators({"c": df["c"], "h": df["h"], "l": df["l"]})
+    out = {
+        "ok": True,
+        "asof": datetime.now(timezone.utc).isoformat(),
+        "t": df.get("t", pd.Series([], dtype="float64")).astype("int64").tolist() if "t" in df else [],
+        "o": pd.Series(df.get("o", []), dtype="float64").replace([np.inf, -np.inf], np.nan).tolist(),
+        "h": pd.Series(df.get("h", []), dtype="float64").replace([np.inf, -np.inf], np.nan).tolist(),
+        "l": pd.Series(df.get("l", []), dtype="float64").replace([np.inf, -np.inf], np.nan).tolist(),
+        "c": pd.Series(df.get("c", []), dtype="float64").replace([np.inf, -np.inf], np.nan).tolist(),
+        "v": pd.Series(df.get("v", []), dtype="float64").replace([np.inf, -np.inf], np.nan).tolist(),
+        "indicators": inds,
+    }
     return out
 
 @app.get("/health")
 def health():
     return {"ok": True, "asof": datetime.now(timezone.utc).isoformat()}
-
-def _bundle_response(df: pd.DataFrame) -> dict:
-    inds = compute_indicators(df.copy())
-    tms = (df["t"].astype("int64") // 10**6).tolist()
-    return {
-        "ok": True,
-        "asof": datetime.now(timezone.utc).isoformat(),
-        "t": tms,
-        "o": _clean_list(df["o"]),
-        "h": _clean_list(df["h"]),
-        "l": _clean_list(df["l"]),
-        "c": _clean_list(df["c"]),
-        "v": _clean_list(df["v"]),
-        "indicators": inds,
-    }
 
 @app.get("/v1/bundle")
 def v1_bundle(symbol: str = Query(...), range: str = Query(...)):
@@ -91,14 +65,22 @@ def v1_bundle(symbol: str = Query(...), range: str = Query(...)):
         return {"ok": False, "error": "DATA_API_BASE not set"}
     url = f"{DATA_API_BASE}/v1/bundle?symbol={quote(symbol)}&range={quote(range)}"
     up = _fetch_json(url)
-    if not up or not up.get("t"):
-        return {"ok": False, "error": f"upstream {up.get('error') if isinstance(up, dict) else 'invalid'}"}
-    df = _to_df(up)
+    if not up or ("t" not in up and not up.get("ok", False)):
+        return {"ok": False, "error": f"upstream {up.get('error','invalid') if isinstance(up,dict) else 'invalid'}"}
+    df = _to_df(up if isinstance(up, dict) else {})
     return _bundle_response(df)
 
+class OhlcIn(Body):
+    t: Optional[List[int]] = None
+    o: List[float]
+    h: List[float]
+    l: List[float]
+    c: List[float]
+    v: Optional[List[float]] = None
+
 @app.post("/v1/compute")
-def v1_compute(body: OhlcvIn = Body(...)):
-    d = body.model_dump()
+def v1_compute(body: dict = Body(...)):
+    d = body
     df = _to_df(d)
-    inds = compute_indicators(df)
+    inds = compute_indicators({"c": df["c"], "h": df["h"], "l": df["l"]})
     return {"ok": True, "asof": datetime.now(timezone.utc).isoformat(), "indicators": inds}

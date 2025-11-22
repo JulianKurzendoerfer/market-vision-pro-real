@@ -1,75 +1,66 @@
 import numpy as np
 import pandas as pd
 
-def _ema(s: pd.Series, n: int) -> pd.Series:
+def _ema(s, n):
     return s.ewm(span=n, adjust=False).mean()
 
-def _sma(s: pd.Series, n: int) -> pd.Series:
-    return s.rolling(n).mean()
-
-def _bbands(close: pd.Series, n: int = 20, k: float = 2.0):
-    mid = _sma(close, n)
-    std = close.rolling(n).std(ddof=0)
-    lo = mid - k * std
-    up = mid + k * std
-    return lo, mid, up
-
-def _rsi(close: pd.Series, n: int = 14) -> pd.Series:
+def _rsi(close, n=14):
     d = close.diff()
     up = d.clip(lower=0)
     dn = (-d).clip(lower=0)
-    roll_up = up.ewm(alpha=1 / n, adjust=False).mean()
-    roll_dn = dn.ewm(alpha=1 / n, adjust=False).mean()
+    a = 1.0 / n
+    roll_up = up.ewm(alpha=a, adjust=False).mean()
+    roll_dn = dn.ewm(alpha=a, adjust=False).mean()
     rs = roll_up / roll_dn.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def _stoch(close: pd.Series, high: pd.Series, low: pd.Series, k: int = 14, d: int = 3, smooth: int = 3):
-    ll = low.rolling(k).min()
-    hh = high.rolling(k).max()
-    raw = 100 * (close - ll) / (hh - ll)
-    kline = raw.rolling(smooth).mean()
+def _stoch(close, high, low, n=14, k=3, d=3):
+    ll = low.rolling(n).min()
+    hh = high.rolling(n).max()
+    raw_k = 100 * (close - ll) / (hh - ll).replace(0, np.nan)
+    kline = raw_k.rolling(k).mean()
     dline = kline.rolling(d).mean()
     return kline, dline
 
-def _clean(s: pd.Series):
-    out = []
-    a = s.to_numpy(dtype=float, copy=False)
-    for x in a:
-        if x is None or np.isnan(x) or np.isinf(x):
-            out.append(None)
-        else:
-            out.append(float(x))
-    return out
+def _bollinger(c, n=20, k=2.0):
+    mid = c.rolling(n).mean()
+    std = c.rolling(n).std(ddof=0)
+    up = mid + k * std
+    dn = mid - k * std
+    return mid, up, dn
 
-def compute_indicators(df: pd.DataFrame) -> dict:
-    c = df["c"]
-    h = df["h"]
-    l = df["l"]
+def _clean_series(s):
+    return pd.Series(s, dtype="float64").replace([np.inf, -np.inf], np.nan).tolist()
+
+def compute_indicators(df):
+    c = pd.Series(df.get("c", []), dtype="float64")
+    h = pd.Series(df.get("h", []), dtype="float64")
+    l = pd.Series(df.get("l", []), dtype="float64")
+
     ema20 = _ema(c, 20)
     ema50 = _ema(c, 50)
     rsi14 = _rsi(c, 14)
     stochK, stochD = _stoch(c, h, l, 14, 3, 3)
-    ema12 = _ema(c, 12)
-    ema26 = _ema(c, 26)
-    macLine = ema12 - ema26
+    macLine = _ema(c, 12) - _ema(c, 26)
     macSignal = macLine.ewm(span=9, adjust=False).mean()
     macHist = macLine - macSignal
-    bbDn, bbMd, bbUp = _bbands(c, 20, 2.0)
-    trendH = c.rolling(20).max()
-    trendL = c.rolling(20).min()
+    bbMid, bbUp, bbDn = _bollinger(c, 20, 2.0)
+    trendH = h.rolling(20).max()
+    trendL = l.rolling(20).min()
+
     return {
-        "ema20": _clean(ema20),
-        "ema50": _clean(ema50),
-        "rsi": _clean(rsi14),
-        "stochK": _clean(stochK),
-        "stochD": _clean(stochD),
-        "macLine": _clean(macLine),
-        "macSignal": _clean(macSignal),
-        "macHist": _clean(macHist),
-        "bbMd": _clean(bbMd),
-        "bbUp": _clean(bbUp),
-        "bbDn": _clean(bbDn),
-        "trendH": _clean(trendH),
-        "trendL": _clean(trendL),
+        "ema20": _clean_series(ema20),
+        "ema50": _clean_series(ema50),
+        "rsi": _clean_series(rsi14),
+        "stochK": _clean_series(stochK),
+        "stochD": _clean_series(stochD),
+        "macLine": _clean_series(macLine),
+        "macSignal": _clean_series(macSignal),
+        "macHist": _clean_series(macHist),
+        "bbMid": _clean_series(bbMid),
+        "bbUp": _clean_series(bbUp),
+        "bbDn": _clean_series(bbDn),
+        "trendH": _clean_series(trendH),
+        "trendL": _clean_series(trendL),
     }
