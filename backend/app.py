@@ -4,7 +4,7 @@ import numpy as np
 import requests
 from fastapi import FastAPI, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
-from .indicators import compute_indicators
+from backend.indicators import compute_indicators
 
 API_BASE = os.environ.get("DATA_API_BASE", "https://eodhd.com/api")
 API_KEY = os.environ.get("DATA_API_KEY", "")
