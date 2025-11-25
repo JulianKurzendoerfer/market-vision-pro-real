@@ -1,93 +1,88 @@
-import numpy as np
-import pandas as pd
+import pandas as pd, numpy as np
 
-def ema(series, span):
-    return series.ewm(span=int(span), adjust=False).mean()
+def ema(s, n):
+    return s.ewm(span=int(n), adjust=False).mean()
 
-def rsi_wilder(close, period=14):
-    d = close.diff()
-    up = d.clip(lower=0)
-    dn = -d.clip(upper=0)
-    avg_up = up.ewm(alpha=1/period, adjust=False).mean()
-    avg_dn = dn.ewm(alpha=1/period, adjust=False).mean()
-    rs = avg_up / avg_dn.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.clip(0, 100)
+def rsi_wilder(close, n=14):
+    d=close.diff()
+    up=d.clip(lower=0)
+    dn=-d.clip(upper=0)
+    au=up.ewm(alpha=1/n, adjust=False).mean()
+    ad=dn.ewm(alpha=1/n, adjust=False).mean()
+    rs=au/ad.replace(0,np.nan)
+    return 100-100/(1+rs)
 
-def atr(high, low, close, period=20, ema_mode=True):
-    pc = close.shift(1)
-    tr = pd.concat([(high-low).abs(), (high-pc).abs(), (low-pc).abs()], axis=1).max(axis=1)
-    return tr.ewm(span=period, adjust=False).mean() if ema_mode else tr.rolling(period).mean()
+def macd_tv(close, fast=12, slow=26, sig=9):
+    ema_f=ema(close,fast)
+    ema_s=ema(close,slow)
+    macd=ema_f-ema_s
+    sigl=ema(macd,sig)
+    hist=macd-sigl
+    return macd, sigl, hist
 
-def macd_tv(close, fast=12, slow=26, signal=9):
-    line = ema(close, fast) - ema(close, slow)
-    sig  = ema(line, signal)
-    hist = line - sig
-    return line, sig, hist
+def stoch_rsi(close, k=14, d=3, smooth_k=3):
+    rsi=rsi_wilder(close, n=k)
+    min_r=rsi.rolling(k).min()
+    max_r=rsi.rolling(k).max()
+    st_k=(rsi-min_r)/(max_r-min_r+1e-9)*100
+    st_k=st_k.rolling(smooth_k).mean()
+    st_d=st_k.rolling(d).mean()
+    return st_k, st_d
 
-def stochastic_full(high, low, close, k_period=14, k_smooth=3, d_period=3):
-    hh = high.rolling(k_period, min_periods=k_period).max()
-    ll = low.rolling(k_period, min_periods=k_period).min()
-    denom = (hh-ll).replace(0, np.nan)
-    raw_k = 100 * (close-ll) / denom
-    k_slow = raw_k.rolling(k_smooth, min_periods=k_smooth).mean()
-    d_slow = k_slow.rolling(d_period, min_periods=d_period).mean()
-    return k_slow.clip(0,100), d_slow.clip(0,100)
+def bbands(close, n=20, mult=2):
+    ma=close.rolling(n).mean()
+    sd=close.rolling(n).std()
+    upper=ma+mult*sd
+    lower=ma-mult*sd
+    return ma, upper, lower, sd
 
-def psar(high, low, step=0.02, max_step=0.2):
-    h = high.values; l = low.values; n = len(h)
-    if n == 0: return pd.Series([], index=high.index)
-    ps = np.zeros(n, float); bull = True; af = step; ep = h[0]; ps[0] = l[0]
-    for i in range(1, n):
-        prev = ps[i-1]
-        if bull:
-            ps[i] = prev + af*(ep - prev)
-            ps[i] = min(ps[i], l[i-1]) if i == 1 else min(ps[i], l[i-1], l[i-2])
-            if l[i] < ps[i]:
-                bull = False; ps[i] = ep; ep = l[i]; af = step
-            else:
-                if h[i] > ep: ep = h[i]; af = min(af+step, max_step)
+def atr(h,l,c,n=14):
+    tr=pd.concat([(h-l).abs(), (h-c.shift(1)).abs(), (l-c.shift(1)).abs()],axis=1).max(axis=1)
+    return tr.rolling(n).mean()
+
+def psar(h,l, step=0.02, max_step=0.2):
+    sar = l.shift(1)
+    ep = h.copy()
+    af = pd.Series(step, index=h.index)
+    bull = pd.Series(True, index=h.index)
+    for i in range(2,len(h)):
+        af.iloc[i]=af.iloc[i-1]
+        bull.iloc[i]=bull.iloc[i-1]
+        ep.iloc[i]=ep.iloc[i-1]
+        sar.iloc[i]=sar.iloc[i-1] + af.iloc[i-1]*(ep.iloc[i-1]-sar.iloc[i-1])
+        if bull.iloc[i-1]:
+            sar.iloc[i]=min(sar.iloc[i], l.iloc[i-1], l.iloc[i-2])
+            if h.iloc[i] > ep.iloc[i-1]:
+                ep.iloc[i]=h.iloc[i]
+                af.iloc[i]=min(max_step, af.iloc[i-1]+step)
+            if l.iloc[i] < sar.iloc[i]:
+                bull.iloc[i]=False
+                sar.iloc[i]=ep.iloc[i-1]
+                ep.iloc[i]=l.iloc[i]
+                af.iloc[i]=step
         else:
-            ps[i] = prev + af*(ep - prev)
-            ps[i] = max(ps[i], h[i-1]) if i == 1 else max(ps[i], h[i-1], h[i-2])
-            if h[i] > ps[i]:
-                bull = True; ps[i] = ep; ep = h[i]; af = step
-            else:
-                if l[i] < ep: ep = l[i]; af = min(af+step, max_step)
-    return pd.Series(ps, index=high.index)
+            sar.iloc[i]=max(sar.iloc[i], h.iloc[i-1], h.iloc[i-2])
+            if l.iloc[i] < ep.iloc[i-1]:
+                ep.iloc[i]=l.iloc[i]
+                af.iloc[i]=min(max_step, af.iloc[i-1]+step)
+            if h.iloc[i] > sar.iloc[i]:
+                bull.iloc[i]=True
+                sar.iloc[i]=ep.iloc[i-1]
+                ep.iloc[i]=h.iloc[i]
+                af.iloc[i]=step
+    return sar
 
-def stoch_rsi(close, period=14, k=3, d=3):
-    r = rsi_wilder(close, period)
-    r_min = r.rolling(period, min_periods=period).min()
-    r_max = r.rolling(period, min_periods=period).max()
-    denom = (r_max - r_min).replace(0, np.nan)
-    st = 100 * (r - r_min) / denom
-    k_line = st.rolling(k, min_periods=k).mean()
-    d_line = k_line.rolling(d, min_periods=d).mean()
-    return k_line.clip(0,100), d_line.clip(0,100)
-
-def compute_indicators(df):
-    out = df.copy()
-    out["EMA9"] = ema(out["Close"], 9)
-    out["EMA21"] = ema(out["Close"], 21)
-    out["EMA50"] = ema(out["Close"], 50)
-    out["EMA100"] = ema(out["Close"], 100)
-    out["EMA200"] = ema(out["Close"], 200)
-    sma20 = out["Close"].rolling(20, min_periods=20).mean()
-    std20 = out["Close"].rolling(20, min_periods=20).std()
-    out["BB_basis"] = sma20
-    out["BB_upper"] = sma20 + 2*std20
-    out["BB_lower"] = sma20 - 2*std20
-    out["ATR20"] = atr(out["High"], out["Low"], out["Close"], 20, ema_mode=True)
-    out["KC_basis"] = ema(out["Close"], 20)
-    out["KC_upper"] = out["KC_basis"] + 2*out["ATR20"]
-    out["KC_lower"] = out["KC_basis"] - 2*out["ATR20"]
-    out["RSI"] = rsi_wilder(out["Close"], 14)
-    m_line, m_sig, m_hist = macd_tv(out["Close"], 12, 26, 9)
-    out["MACD"] = m_line; out["MACD_sig"] = m_sig; out["MACD_hist"] = m_hist
-    kf, df_ = stochastic_full(out["High"], out["Low"], out["Close"], 14, 3, 3)
-    out["%K"] = kf; out["%D"] = df_
-    sk, sd = stoch_rsi(out["Close"], 14, 3, 3)
-    out["ST_RSI_K"] = sk; out["ST_RSI_D"] = sd
-    out["PSAR"] = psar(out["High"], out["Low"])
+def compute(df):
+    c=df["Close"]; h=df["High"]; l=df["Low"]
+    out=pd.DataFrame(index=df.index)
+    out["EMA20"]=ema(c,20); out["EMA50"]=ema(c,50); out["EMA200"]=ema(c,200)
+    out["RSI"]=rsi_wilder(c,14)
+    m,s,h=macd_tv(c,12,26,9)
+    out["MACD"]=m; out["MACD_sig"]=s; out["MACD_hist"]=h
+    kf,df_=stoch_rsi(c,14,3,3)
+    out["%K"]=kf; out["%D"]=df_
+    ma,up,low,sd=bbands(c,20,2)
+    out["BB_mid"]=ma; out["BB_up"]=up; out["BB_low"]=low
+    out["ATR14"]=atr(h,l,c,14)
+    out["PSAR"]=psar(h,l)
     return out

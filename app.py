@@ -1,63 +1,80 @@
-import os, time, requests, pandas as pd
-from fastapi import FastAPI, Body
+import os, time, datetime as dt, requests, pandas as pd
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from indicators import compute_indicators
+from pydantic import BaseModel
+from indicators import compute
 
-API_BASE = os.getenv("DATA_API_BASE", "").rstrip("/")
-API_KEY = os.getenv("DATA_API_KEY", "")
+API=os.getenv("EODHD_API_KEY","")
+ORIG=os.getenv("ALLOWED_ORIGINS","*")
 
-app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=os.getenv("ALLOWED_ORIGINS","*").split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app=FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=[ORIG,"*"], allow_methods=["*"], allow_headers=["*"])
 
-_CACHE = {}
-
+_CACHE={}
 def _df_from_ohlc(data):
-    df = pd.DataFrame(data)
-    if "t" in df.columns:
-        df["t"] = pd.to_datetime(df["t"], unit="s", utc=True).dt.tz_localize(None)
-        df = df.rename(columns={"t":"Date","o":"Open","h":"High","l":"Low","c":"Close","v":"Volume"})
-        df = df.set_index("Date").sort_index()
-    return df
-
-def _fetch(symbol, range_):
-    key = (symbol, range_)
-    hit = _CACHE.get(key)
-    if hit and time.time() - hit["t"] < 240:
-        return hit["data"], True
-    url = f"{API_BASE}/v1/ohlc?symbol={symbol}&range={range_}"
-    headers = {"Accept":"application/json"}
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
-    r = requests.get(url, headers=headers, timeout=30)
-    j = r.json()
-    if j.get("ok"):
-        _CACHE[key] = {"t": time.time(), "data": j.get("data")}
-        return j.get("data"), False
-    return None, False
+    try:
+        rows=data["candles"]
+        if not rows: return None
+        df=pd.DataFrame(rows)
+        if "t" in df.columns: df["date"]=pd.to_datetime(df["t"],unit="s").dt.tz_localize("UTC").dt.tz_convert("Europe/Berlin").dt.date
+        for c in ["o","h","l","c","v"]:
+            if c in df.columns: df[c]=pd.to_numeric(df[c],errors="coerce")
+        df=df.rename(columns={"o":"Open","h":"High","l":"Low","c":"Close","v":"Volume"})
+        df=df.dropna(subset=["Open","High","Low","Close"])
+        return df
+    except Exception:
+        return None
 
 @app.get("/health")
 def health():
     return {"ok": True}
 
+def _rng_to_from(r):
+    now=dt.date.today()
+    if r=="1M": return now-dt.timedelta(days=31)
+    if r=="3M": return now-dt.timedelta(days=93)
+    if r=="6M": return now-dt.timedelta(days=186)
+    if r=="1Y": return now-dt.timedelta(days=372)
+    if r=="5Y": return now-dt.timedelta(days=1860)
+    return now-dt.timedelta(days=3650)
+
+def _fetch(symbol, r):
+    key=(symbol,r)
+    hit=_CACHE.get(key)
+    if hit and time.time()-hit["t"]<240:
+        return hit["data"], True
+    start=_rng_to_from(r)
+    url=f"https://eodhd.com/api/eod/{symbol}?period=d&order=a&from={start:%Y-%m-%d}&api_token={API}&fmt=json"
+    try:
+        j=requests.get(url,timeout=25).json()
+        if isinstance(j, list):
+            df=pd.DataFrame(j)
+            if "date" in df.columns: df["date"]=pd.to_datetime(df["date"]).dt.date
+            df=df.rename(columns={"open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"})
+            data={"candles":df.rename(columns={"date":"t","Open":"o","High":"h","Low":"l","Close":"c","Volume":"v"}).assign(t=lambda x: pd.to_datetime(x["t"]).astype("int64")//10**9).to_dict("records")}
+        else:
+            data=j
+        _CACHE[key]={"t":time.time(),"data":data}
+        return data, False
+    except Exception:
+        return None, False
+
 @app.get("/v1/bundle")
-def bundle(symbol: str, range: str = "1Y", interval: str = "1d", adjusted: bool = True, currency: str = "USD"):
-    if not API_BASE:
-        return {"ok": False, "error": "DATA_API_BASE missing"}
-    data, _ = _fetch(symbol, range)
-    if not data:
-        return {"ok": False, "error": "upstream error"}
-    df = _df_from_ohlc(data)
-    if len(df) == 0:
-        return {"ok": False, "error": "no data"}
-    df = df.dropna().copy()
-    out = compute_indicators(df)
-    meta = {"symbol": symbol, "range": range, "interval": interval, "adjusted": adjusted, "currency": currency, "rows": int(len(out))}
-    return {"ok": True, "meta": meta, "ohlc": df[["Open","High","Low","Close","Volume"]].reset_index().to_dict(orient="records"), "indicators": out[["EMA9","EMA21","EMA50","EMA100","EMA200","BB_basis","BB_upper","BB_lower","ATR20","KC_basis","KC_upper","KC_lower","RSI","MACD","MACD_sig","MACD_hist","%K","%D","ST_RSI_K","ST_RSI_D","PSAR"]].reset_index().to_dict(orient="records")}
+def bundle(symbol: str, range: str="1Y", interval: str="1d", adjusted: bool=True):
+    data,_=_fetch(symbol, range)
+    if not data: return {"ok": False, "error": "upstream"}
+    df=_df_from_ohlc(data)
+    if df is None or len(df)==0: return {"ok": False, "error":"no data"}
+    out=compute(df.copy())
+    meta={"symbol":symbol,"range":range,"interval":interval}
+    return {"ok": True,"meta":meta,"ohlc": df[["Open","High","Low","Close","Volume"]].round(6).to_dict(orient="list"),"indicators": out.reset_index().to_dict(orient="list")}
+
+class Body(BaseModel):
+    ohlc: list
 
 @app.post("/v1/compute")
-def v1_compute(body: dict = Body(...)):
-    df = _df_from_ohlc(body.get("ohlc", []))
-    if len(df) == 0:
-        return {"ok": False, "error": "empty"}
-    out = compute_indicators(df)
-    return {"ok": True, "indicators": out.reset_index().to_dict(orient="records")}
+def v1_compute(body: Body):
+    df=pd.DataFrame(body.ohlc, columns=["Open","High","Low","Close","Volume"])
+    if len(df)==0: return {"ok": False, "error":"empty"}
+    out=compute(df.copy())
+    return {"ok": True, "indicators": out.reset_index().to_dict(orient="list")}
