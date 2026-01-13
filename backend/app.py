@@ -122,11 +122,12 @@ def health():
 @app.get("/api/tv")
 def tv(
     symbol: str = Query(..., min_length=1, max_length=32),
-    period: str = Query("d", pattern="^(d|w|m)$"),
-    days: int = Query(520, ge=120, le=5000),
+    period: str = Query("d", pattern="^(d|w|m) ),
+    full: int = Query(1, ge=0, le=1),
+    days: int = Query(520, ge=120, le=80000),
 ):
     to_d = date.today()
-    from_d = to_d - timedelta(days=days)
+    from_d = date(1900, 1, 1) if int(full) == 1 else (to_d - timedelta(days=days))
     raw = _get(
         f"eod/{symbol}",
         {"from": from_d.isoformat(), "to": to_d.isoformat(), "period": period},
