@@ -149,12 +149,25 @@ export default function App() {
       safeSet(e100, lineData(overlays, "ema100"))
       safeSet(e200, lineData(overlays, "ema200"))
 
-      const rsi = rsiChart.addLineSeries({ lineWidth: 2, color: "#c084fc", ...noPriceLine })
-      safeSet(rsi, lineData(overlays, "rsi14"))
-
       const t0 = candles[0].time
       const t1 = candles[candles.length - 1].time
 
+      const levels = Array.isArray(data.levels) ? data.levels : []
+      for (const lvl of levels) {
+        if (!isNum(lvl.value)) continue
+        const strength = Math.max(1, Number(lvl.strength || 1))
+        const width = Math.min(5, 1 + Math.floor(strength / 2))
+        const alpha = Math.min(0.55, 0.18 + strength * 0.05)
+        const color = lvl.type === "support"
+          ? `rgba(52, 199, 89, ${alpha})`
+          : `rgba(255, 59, 48, ${alpha})`
+
+        const s = mainChart.addLineSeries({ lineWidth: width, color, ...noPriceLine })
+        s.setData([{ time: t0, value: Number(lvl.value) }, { time: t1, value: Number(lvl.value) }])
+      }
+
+      const rsi = rsiChart.addLineSeries({ lineWidth: 2, color: "#c084fc", ...noPriceLine })
+      safeSet(rsi, lineData(overlays, "rsi14"))
       rsiChart.addLineSeries({ lineWidth: 1, color: "#ff3b30", ...noPriceLine }).setData([{ time: t0, value: 70 }, { time: t1, value: 70 }])
       rsiChart.addLineSeries({ lineWidth: 1, color: "#34c759", ...noPriceLine }).setData([{ time: t0, value: 30 }, { time: t1, value: 30 }])
 
@@ -162,7 +175,6 @@ export default function App() {
       const dline = stochChart.addLineSeries({ lineWidth: 2, color: "#22c55e", ...noPriceLine })
       safeSet(k, lineData(overlays, "stoch_k"))
       safeSet(dline, lineData(overlays, "stoch_d"))
-
       stochChart.addLineSeries({ lineWidth: 1, color: "#ff3b30", ...noPriceLine }).setData([{ time: t0, value: 80 }, { time: t1, value: 80 }])
       stochChart.addLineSeries({ lineWidth: 1, color: "#34c759", ...noPriceLine }).setData([{ time: t0, value: 20 }, { time: t1, value: 20 }])
 
@@ -172,7 +184,6 @@ export default function App() {
       safeSet(hist, histData(overlays, "macd_hist"))
       safeSet(macd, lineData(overlays, "macd"))
       safeSet(sig,  lineData(overlays, "macd_signal"))
-
       macdChart.addLineSeries({ lineWidth: 1, color: "rgba(255,255,255,0.55)", ...noPriceLine }).setData([{ time: t0, value: 0 }, { time: t1, value: 0 }])
 
       mainChart.timeScale().fitContent()

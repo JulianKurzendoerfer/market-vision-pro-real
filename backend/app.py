@@ -193,4 +193,72 @@ def tv(
     candles = candles[-300:]
     overlays = overlays[-300:]
     last = overlays[-1]
-    return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last}
+    levels = _sr_levels(candles)
+    return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels}
+
+def _sr_levels(candles, pivot_left=6, pivot_right=6, tol_pct=0.003, max_levels=18):
+    if not candles or len(candles) < (pivot_left + pivot_right + 10):
+        return []
+
+    pivots = []
+    n = len(candles)
+
+    for i in range(pivot_left, n - pivot_right):
+        lo = candles[i]["low"]
+        hi = candles[i]["high"]
+
+        is_low = True
+        is_high = True
+
+        for j in range(i - pivot_left, i + pivot_right + 1):
+            if candles[j]["low"] < lo:
+                is_low = False
+            if candles[j]["high"] > hi:
+                is_high = False
+            if not is_low and not is_high:
+                break
+
+        if is_low:
+            pivots.append(("support", float(lo)))
+        if is_high:
+            pivots.append(("resistance", float(hi)))
+
+    if not pivots:
+        return []
+
+    supports = [p[1] for p in pivots if p[0] == "support"]
+    resistances = [p[1] for p in pivots if p[0] == "resistance"]
+
+    def cluster(values):
+        values = sorted(values)
+        clusters = []
+        for v in values:
+            placed = False
+            for c in clusters:
+                mid = c["sum"] / c["count"]
+                if abs(v - mid) / mid <= tol_pct:
+                    c["sum"] += v
+                    c["count"] += 1
+                    placed = True
+                    break
+            if not placed:
+                clusters.append({"sum": v, "count": 1})
+        out = []
+        for c in clusters:
+            out.append({"value": c["sum"] / c["count"], "strength": c["count"]})
+        out.sort(key=lambda x: (-x["strength"], -x["value"]))
+        return out
+
+    sup = cluster(supports)
+    res = cluster(resistances)
+
+    all_lvls = []
+    for x in sup:
+        all_lvls.append({"type": "support", "value": round(float(x["value"]), 6), "strength": int(x["strength"])})
+    for x in res:
+        all_lvls.append({"type": "resistance", "value": round(float(x["value"]), 6), "strength": int(x["strength"])})
+
+    all_lvls.sort(key=lambda x: (-x["strength"], x["type"]))
+    all_lvls = all_lvls[:max_levels]
+
+    return all_lvls
