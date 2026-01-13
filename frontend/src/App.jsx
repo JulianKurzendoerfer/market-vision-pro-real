@@ -56,8 +56,8 @@ export default function App() {
     height: h,
     layout: { background: { type: "solid", color: "#0b0f19" }, textColor: "#d6d6d6" },
     grid: { vertLines: { color: "rgba(255,255,255,0.06)" }, horzLines: { color: "rgba(255,255,255,0.06)" } },
-    rightPriceScale: { borderColor: "rgba(255,255,255,0.15)", minimumWidth: 70, scaleMargins: { top: 0.10, bottom: 0.10 } },
-    timeScale: { borderColor: "rgba(255,255,255,0.15)", visible: timeVisible, rightOffset: 8, barSpacing: 8, lockVisibleTimeRangeOnResize: true },
+    rightPriceScale: { borderColor: "rgba(255,255,255,0.15)", minimumWidth: 90, scaleMargins: { top: 0.10, bottom: 0.10 } },
+    timeScale: { borderColor: "rgba(255,255,255,0.15)", visible: timeVisible, rightOffset: 22, barSpacing: 8, lockVisibleTimeRangeOnResize: true },
     watermark: { visible: true, text: "MVP", fontSize: 18, color: "rgba(255,255,255,0.08)" },
     attributionLogo: false,
     crosshair: { mode: 1 }
@@ -112,7 +112,6 @@ export default function App() {
 
       const candles = cleanCandles(data.candles)
       const overlays = (data.overlays || []).filter(x => isTime(x.time))
-
       if (candles.length < 60) throw new Error("Zu wenig gültige Candle-Daten.")
 
       setLast(data.last || null)
@@ -128,7 +127,7 @@ export default function App() {
 
       charts.current = { mainChart, rsiChart, stochChart, macdChart }
 
-      const cs = mainChart.addCandlestickSeries({ ...noPriceLine })
+      const cs = mainChart.addCandlestickSeries({ priceLineVisible: false, lastValueVisible: false })
       cs.setData(candles)
 
       const bbColor = "#22d3ee"
@@ -148,9 +147,6 @@ export default function App() {
       safeSet(e50,  lineData(overlays, "ema50"))
       safeSet(e100, lineData(overlays, "ema100"))
       safeSet(e200, lineData(overlays, "ema200"))
-
-      const t0 = candles[0].time
-      const t1 = candles[candles.length - 1].time
 
       const levels = Array.isArray(data.levels) ? data.levels : []
       const SR_COLOR = "rgba(255,255,255,0.18)"
@@ -178,6 +174,9 @@ export default function App() {
         axisLabelVisible: true,
         title: ""
       })
+
+      const t0 = candles[0].time
+      const t1 = candles[candles.length - 1].time
 
       const rsi = rsiChart.addLineSeries({ lineWidth: 2, color: "#c084fc", ...noPriceLine })
       safeSet(rsi, lineData(overlays, "rsi14"))
@@ -232,33 +231,119 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize)
   }, [])
 
+  const page = {
+    minHeight: "100vh",
+    background: "#ffffff",
+    padding: "28px 16px 40px"
+  }
+
+  const container = {
+    maxWidth: 1100,
+    margin: "0 auto"
+  }
+
+  const title = {
+    textAlign: "center",
+    fontSize: 40,
+    fontWeight: 800,
+    letterSpacing: "-0.6px",
+    color: "#0b2a5b",
+    margin: "6px 0 18px"
+  }
+
+  const formWrap = {
+    display: "flex",
+    justifyContent: "center",
+    marginBottom: 14
+  }
+
+  const form = {
+    width: "100%",
+    maxWidth: 760,
+    display: "flex",
+    gap: 12,
+    alignItems: "center",
+    padding: 10,
+    borderRadius: 14,
+    border: "1px solid rgba(11,42,91,0.12)",
+    background: "linear-gradient(180deg, #ffffff 0%, #fbfcff 100%)",
+    boxShadow: "0 10px 30px rgba(11,42,91,0.08)"
+  }
+
+  const input = {
+    flex: 1,
+    height: 46,
+    padding: "0 14px",
+    borderRadius: 12,
+    border: "1px solid rgba(11,42,91,0.16)",
+    outline: "none",
+    fontSize: 16
+  }
+
+  const button = {
+    height: 46,
+    padding: "0 18px",
+    borderRadius: 12,
+    border: "1px solid rgba(11,42,91,0.15)",
+    background: "linear-gradient(180deg, #0b2a5b 0%, #0a244d 100%)",
+    color: "white",
+    fontSize: 16,
+    fontWeight: 700,
+    cursor: "pointer",
+    opacity: loading ? 0.7 : 1
+  }
+
+  const info = {
+    maxWidth: 760,
+    margin: "0 auto 12px",
+    color: "rgba(11,42,91,0.55)",
+    fontSize: 13,
+    textAlign: "center"
+  }
+
+  const card = {
+    maxWidth: 1100,
+    margin: "0 auto",
+    borderRadius: 16,
+    border: "1px solid rgba(11,42,91,0.10)",
+    background: "#ffffff",
+    boxShadow: "0 16px 50px rgba(11,42,91,0.08)",
+    padding: 14
+  }
+
   return (
-    <div style={{ fontFamily: "system-ui", padding: 16, maxWidth: 1280, margin: "0 auto", paddingRight: 24 }} ref={wrapRef}>
-      <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Market Vision Pro</div>
+    <div style={page}>
+      <div style={container}>
+        <div style={title}>Market Vision Pro</div>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
-        <input value={symbol} onChange={e => setSymbol(e.target.value)} style={{ flex: 1, padding: 10, fontSize: 16 }} />
-        <button onClick={run} disabled={loading} style={{ padding: "10px 14px", fontSize: 16 }}>
-          {loading ? "Lade..." : "Analyse"}
-        </button>
-      </div>
-
-      {err ? <div style={{ color: "#ff6b6b", marginBottom: 10 }}>{err}</div> : null}
-
-      {last ? (
-        <div style={{ color: "#d6d6d6", marginBottom: 10 }}>
-          <div>Preis: {isNum(last.close) ? Number(last.close).toFixed(2) : "-"}</div>
-          <div>RSI: {isNum(last.rsi14) ? Number(last.rsi14).toFixed(2) : "-"}</div>
-          <div>Stoch K/D: {isNum(last.stoch_k) ? Number(last.stoch_k).toFixed(2) : "-"} / {isNum(last.stoch_d) ? Number(last.stoch_d).toFixed(2) : "-"}</div>
-          <div>MACD: {isNum(last.macd) ? Number(last.macd).toFixed(4) : "-"} | Signal: {isNum(last.macd_signal) ? Number(last.macd_signal).toFixed(4) : "-"}</div>
+        <div style={formWrap}>
+          <div style={form}>
+            <input
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value)}
+              placeholder="Ticker eingeben (z.B. AAPL.US)"
+              style={input}
+            />
+            <button onClick={run} disabled={loading} style={button}>
+              {loading ? "Lädt..." : "Analyse"}
+            </button>
+          </div>
         </div>
-      ) : null}
 
-      <div style={{ borderRadius: 10, overflow: "hidden" }}>
-        <div ref={mainRef} />
-        <div ref={rsiRef} />
-        <div ref={stochRef} />
-        <div ref={macdRef} />
+        <div style={info}>
+          Eingabe: US = .US (z.B. TSLA.US) · Deutschland z.B. BMW.DE
+        </div>
+
+        {err ? <div style={{ maxWidth: 760, margin: "0 auto 12px", color: "#b42318", fontWeight: 600, textAlign: "center" }}>{err}</div> : null}
+
+        <div style={card} ref={wrapRef}>
+          <div style={{ borderRadius: 12, overflow: "hidden" }}>
+            <div ref={mainRef} />
+            <div ref={rsiRef} />
+            <div ref={stochRef} />
+            <div ref={macdRef} />
+          </div>
+        </div>
       </div>
     </div>
   )
