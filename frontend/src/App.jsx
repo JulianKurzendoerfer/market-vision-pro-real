@@ -36,15 +36,24 @@ export default function App() {
 
   const heights = useMemo(() => ({ main: 420, rsi: 140, stoch: 170, macd: 170 }), [])
 
-  const baseOpts = (w, h, showTime) => ({
+  const baseOpts = (w, h, timeVisible) => ({
     width: w,
     height: h,
     layout: { background: { type: "solid", color: "#0b0f19" }, textColor: "#d6d6d6" },
     grid: { vertLines: { color: "rgba(255,255,255,0.06)" }, horzLines: { color: "rgba(255,255,255,0.06)" } },
     rightPriceScale: { borderColor: "rgba(255,255,255,0.15)" },
-    timeScale: { borderColor: "rgba(255,255,255,0.15)", visible: showTime },
+    timeScale: {
+      borderColor: "rgba(255,255,255,0.15)",
+      visible: timeVisible,
+      rightOffset: 5,
+      barSpacing: 8,
+      fixLeftEdge: false,
+      fixRightEdge: false,
+      lockVisibleTimeRangeOnResize: true
+    },
     watermark: { visible: false },
-    attributionLogo: false
+    attributionLogo: false,
+    crosshair: { mode: 1 }
   })
 
   function destroy() {
@@ -54,6 +63,35 @@ export default function App() {
 
   function safeSet(series, data) {
     try { series.setData(data) } catch {}
+  }
+
+  function syncTimeScales(all) {
+    const keys = Object.keys(all)
+    const lock = { v: false }
+
+    keys.forEach(k => {
+      const ts = all[k].timeScale()
+      ts.subscribeVisibleLogicalRangeChange((range) => {
+        if (lock.v || !range) return
+        lock.v = true
+        keys.forEach(k2 => {
+          if (k2 === k) return
+          try { all[k2].timeScale().setVisibleLogicalRange(range) } catch {}
+        })
+        lock.v = false
+      })
+    })
+  }
+
+  function applySameRangeFromMain(all) {
+    const main = all.mainChart
+    if (!main) return
+    const r = main.timeScale().getVisibleLogicalRange()
+    if (!r) return
+    Object.entries(all).forEach(([name, c]) => {
+      if (name === "mainChart") return
+      try { c.timeScale().setVisibleLogicalRange(r) } catch {}
+    })
   }
 
   async function run() {
@@ -74,10 +112,10 @@ export default function App() {
 
       const w = wrapRef.current?.clientWidth || 1000
 
-      const mainChart  = createChart(mainRef.current,  baseOpts(w, heights.main, false))
+      const mainChart  = createChart(mainRef.current,  baseOpts(w, heights.main, true))
       const rsiChart   = createChart(rsiRef.current,   baseOpts(w, heights.rsi, false))
       const stochChart = createChart(stochRef.current, baseOpts(w, heights.stoch, false))
-      const macdChart  = createChart(macdRef.current,  baseOpts(w, heights.macd, true))
+      const macdChart  = createChart(macdRef.current,  baseOpts(w, heights.macd, false))
 
       charts.current = { mainChart, rsiChart, stochChart, macdChart }
 
@@ -123,17 +161,8 @@ export default function App() {
       safeSet(sig,  lineData(overlays, "macd_signal"))
 
       mainChart.timeScale().fitContent()
-
-      const range = mainChart.timeScale().getVisibleRange()
-      if (range) {
-        rsiChart.timeScale().setVisibleRange(range)
-        stochChart.timeScale().setVisibleRange(range)
-        macdChart.timeScale().setVisibleRange(range)
-      } else {
-        rsiChart.timeScale().fitContent()
-        stochChart.timeScale().fitContent()
-        macdChart.timeScale().fitContent()
-      }
+      applySameRangeFromMain(charts.current)
+      syncTimeScales(charts.current)
     } catch (e) {
       setErr(String(e?.message || e))
     } finally {
@@ -148,6 +177,7 @@ export default function App() {
       const w = wrapRef.current?.clientWidth
       if (!w) return
       Object.values(charts.current).forEach(c => { try { c.applyOptions({ width: w }) } catch {} })
+      applySameRangeFromMain(charts.current)
     }
     window.addEventListener("resize", onResize)
     return () => window.removeEventListener("resize", onResize)
