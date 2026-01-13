@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from "react"
 
-const API = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "")
+import { API_URL } from "./config.js"
+
+const API = API_URL.replace(/\/$/, "")
 
 export default function App() {
   const [symbol, setSymbol] = useState("AAPL.US")
