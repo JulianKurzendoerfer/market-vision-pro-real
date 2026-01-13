@@ -1,14 +1,19 @@
 services:
   - type: web
-    name: market-vision-pro-real
+    name: mvp-backend
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn -k uvicorn.workers.UvicornWorker backend.main:app --bind 0.0.0.0:$PORT
     healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: EODHD_API_KEY
+        sync: false
 
   - type: web
-    name: market-vision-pro-real-front
+    name: mvp-frontend
     env: static
     buildCommand: cd frontend && npm ci && npm run build
     staticPublishPath: frontend/dist
@@ -16,5 +21,5 @@ services:
       - key: VITE_API_URL
         fromService:
           type: web
-          name: market-vision-pro-real
+          name: mvp-backend
           property: url
