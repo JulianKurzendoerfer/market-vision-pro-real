@@ -134,10 +134,19 @@ export default function App() {
       const rsi = rsiChart.addLineSeries({ lineWidth: 2, ...noPriceLine })
       safeSet(rsi, lineData(overlays, "rsi14"))
 
+      const t0 = candles[0].time
+      const t1 = candles[candles.length - 1].time
+
+      rsiChart.addLineSeries({ lineWidth: 1, color: "#ff3b30", ...noPriceLine }).setData([{ time: t0, value: 70 }, { time: t1, value: 70 }])
+      rsiChart.addLineSeries({ lineWidth: 1, color: "#34c759", ...noPriceLine }).setData([{ time: t0, value: 30 }, { time: t1, value: 30 }])
+
       const k = stochChart.addLineSeries({ lineWidth: 2, ...noPriceLine })
       const dline = stochChart.addLineSeries({ lineWidth: 2, ...noPriceLine })
       safeSet(k, lineData(overlays, "stoch_k"))
       safeSet(dline, lineData(overlays, "stoch_d"))
+
+      stochChart.addLineSeries({ lineWidth: 1, color: "#ff3b30", ...noPriceLine }).setData([{ time: t0, value: 80 }, { time: t1, value: 80 }])
+      stochChart.addLineSeries({ lineWidth: 1, color: "#34c759", ...noPriceLine }).setData([{ time: t0, value: 20 }, { time: t1, value: 20 }])
 
       const hist = macdChart.addHistogramSeries({ ...noPriceLine })
       const macd = macdChart.addLineSeries({ lineWidth: 2, ...noPriceLine })
@@ -145,6 +154,8 @@ export default function App() {
       safeSet(hist, histData(overlays, "macd_hist"))
       safeSet(macd, lineData(overlays, "macd"))
       safeSet(sig,  lineData(overlays, "macd_signal"))
+
+      macdChart.addLineSeries({ lineWidth: 1, color: "#ffffff", ...noPriceLine }).setData([{ time: t0, value: 0 }, { time: t1, value: 0 }])
 
       mainChart.timeScale().fitContent()
       applySameRangeFromMain(charts.current)
