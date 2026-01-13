@@ -153,7 +153,7 @@ export default function App() {
       const t1 = candles[candles.length - 1].time
 
       const levels = Array.isArray(data.levels) ? data.levels : []
-      const SR_COLOR = "rgba(255,255,255,0.28)"
+      const SR_COLOR = "rgba(255,255,255,0.18)"
       const fmt = (v) => Number(v).toFixed(2)
       for (const lvl of levels) {
         if (!lvl || !isNum(lvl.value)) continue
@@ -165,9 +165,19 @@ export default function App() {
           lineWidth: width,
           lineStyle: 0,
           axisLabelVisible: true,
-          title: fmt(lvl.value)
+          title: ""
         })
       }
+
+      const lastClose = candles[candles.length - 1].close
+      cs.createPriceLine({
+        price: Number(lastClose),
+        color: "rgba(52,199,89,0.95)",
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: ""
+      })
 
       const rsi = rsiChart.addLineSeries({ lineWidth: 2, color: "#c084fc", ...noPriceLine })
       safeSet(rsi, lineData(overlays, "rsi14"))
