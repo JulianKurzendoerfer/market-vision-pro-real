@@ -32,42 +32,6 @@ def _ema(values, span):
         out.append(alpha * v + (1 - alpha) * out[-1])
     return out
 
-def _rsi(values, period=14):
-    if len(values) < period + 1:
-        return [None] * len(values)
-    deltas = [values[i] - values[i - 1] for i in range(1, len(values))]
-    gains = [max(d, 0.0) for d in deltas]
-    losses = [max(-d, 0.0) for d in deltas]
-
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-
-    rsi = [None] * (period)
-    if avg_loss == 0:
-        rsi.append(100.0)
-    else:
-        rs = avg_gain / avg_loss
-        rsi.append(100 - (100 / (1 + rs)))
-
-    for i in range(period, len(deltas)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-        if avg_loss == 0:
-            rsi.append(100.0)
-        else:
-            rs = avg_gain / avg_loss
-            rsi.append(100 - (100 / (1 + rs)))
-
-    return [None] + rsi
-
-def _macd(values, fast=12, slow=26, signal=9):
-    ema_fast = _ema(values, fast)
-    ema_slow = _ema(values, slow)
-    macd_line = [a - b for a, b in zip(ema_fast, ema_slow)]
-    signal_line = _ema(macd_line, signal)
-    hist = [m - s for m, s in zip(macd_line, signal_line)]
-    return macd_line, signal_line, hist
-
 def _sma(values, period):
     out = []
     s = 0.0
@@ -107,8 +71,64 @@ def _bb(values, period=20, std_mul=2.0):
             lower.append(m - std_mul * s)
     return upper, mid, lower
 
-app = FastAPI()
+def _rsi(values, period=14):
+    if len(values) < period + 1:
+        return [None] * len(values)
+    deltas = [values[i] - values[i - 1] for i in range(1, len(values))]
+    gains = [max(d, 0.0) for d in deltas]
+    losses = [max(-d, 0.0) for d in deltas]
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    rsi = [None] * period
+    rsi.append(100.0 if avg_loss == 0 else 100 - (100 / (1 + (avg_gain / avg_loss))))
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        rsi.append(100.0 if avg_loss == 0 else 100 - (100 / (1 + (avg_gain / avg_loss))))
+    return [None] + rsi
 
+def _macd(values, fast=12, slow=26, signal=9):
+    ema_fast = _ema(values, fast)
+    ema_slow = _ema(values, slow)
+    macd_line = [a - b for a, b in zip(ema_fast, ema_slow)]
+    signal_line = _ema(macd_line, signal)
+    hist = [m - s for m, s in zip(macd_line, signal_line)]
+    return macd_line, signal_line, hist
+
+def _stoch(highs, lows, closes, period=14, smooth_k=1, smooth_d=3):
+    k_raw = [None] * len(closes)
+    for i in range(len(closes)):
+        if i + 1 < period:
+            continue
+        hh = max(highs[i - period + 1 : i + 1])
+        ll = min(lows[i - period + 1 : i + 1])
+        denom = (hh - ll)
+        if denom == 0:
+            k_raw[i] = 0.0
+        else:
+            k_raw[i] = 100.0 * (closes[i] - ll) / denom
+    k_vals = []
+    for v in k_raw:
+        k_vals.append(v)
+    if smooth_k > 1:
+        tmp = []
+        for i in range(len(k_vals)):
+            if k_vals[i] is None:
+                tmp.append(None)
+                continue
+            window = [x for x in k_vals[max(0, i - smooth_k + 1): i + 1] if x is not None]
+            tmp.append(sum(window) / len(window) if window else None)
+        k_vals = tmp
+    d_vals = []
+    for i in range(len(k_vals)):
+        if k_vals[i] is None:
+            d_vals.append(None)
+            continue
+        window = [x for x in k_vals[max(0, i - smooth_d + 1): i + 1] if x is not None]
+        d_vals.append(sum(window) / len(window) if window else None)
+    return k_vals, d_vals
+
+app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -128,68 +148,74 @@ def quote(symbol: str = Query(..., min_length=1, max_length=32)):
         raise HTTPException(status_code=502, detail=f"EODHD: {data.get('message')}")
     return data
 
-@app.get("/api/candles")
-def candles(
+@app.get("/api/tv")
+def tv(
     symbol: str = Query(..., min_length=1, max_length=32),
     period: str = Query("d", pattern="^(d|w|m)$"),
-    days: int = Query(200, ge=30, le=5000),
+    days: int = Query(420, ge=120, le=5000),
 ):
     to_d = date.today()
     from_d = to_d - timedelta(days=days)
-    data = _get(
+    raw = _get(
         f"eod/{symbol}",
         {"from": from_d.isoformat(), "to": to_d.isoformat(), "period": period},
     )
-    if not isinstance(data, list) or len(data) == 0:
+    if not isinstance(raw, list) or len(raw) == 0:
         raise HTTPException(status_code=502, detail="No candle data returned")
-    return data
 
-@app.get("/api/indicators")
-def indicators(
-    symbol: str = Query(..., min_length=1, max_length=32),
-    period: str = Query("d", pattern="^(d|w|m)$"),
-    days: int = Query(320, ge=60, le=5000),
-):
-    raw = candles(symbol=symbol, period=period, days=days)
     raw_sorted = sorted(raw, key=lambda x: x.get("date", ""))
-    closes = []
-    series = []
-    for row in raw_sorted:
-        c = row.get("close")
-        d = row.get("date")
-        if c is None or d is None:
+    candles = []
+    closes, highs, lows = [], [], []
+
+    for r in raw_sorted:
+        d = r.get("date")
+        o, h, l, c = r.get("open"), r.get("high"), r.get("low"), r.get("close")
+        if d is None or c is None or h is None or l is None:
             continue
         try:
+            o = float(o) if o is not None else None
+            h = float(h)
+            l = float(l)
             c = float(c)
         except Exception:
             continue
+        candles.append({"time": d, "open": o, "high": h, "low": l, "close": c})
         closes.append(c)
-        series.append({
-            "date": d,
-            "open": row.get("open"),
-            "high": row.get("high"),
-            "low": row.get("low"),
-            "close": c,
-            "volume": row.get("volume"),
-        })
-    if len(closes) < 60:
+        highs.append(h)
+        lows.append(l)
+
+    if len(candles) < 120:
         raise HTTPException(status_code=502, detail="Not enough candle data")
 
-    rsi14 = _rsi(closes, 14)
-    macd, macd_sig, macd_hist = _macd(closes, 12, 26, 9)
     bb_u, bb_m, bb_l = _bb(closes, 20, 2.0)
+    ema20 = _ema(closes, 20)
+    ema50 = _ema(closes, 50)
+    ema100 = _ema(closes, 100)
+    ema200 = _ema(closes, 200)
+    rsi14 = _rsi(closes, 14)
+    stoch_k, stoch_d = _stoch(highs, lows, closes, 14, 1, 3)
+    macd, macd_sig, macd_hist = _macd(closes, 12, 26, 9)
 
-    out = []
-    for i in range(len(series)):
-        row = dict(series[i])
-        row["rsi14"] = rsi14[i]
-        row["macd"] = macd[i]
-        row["macd_signal"] = macd_sig[i]
-        row["macd_hist"] = macd_hist[i]
-        row["bb_upper"] = bb_u[i]
-        row["bb_middle"] = bb_m[i]
-        row["bb_lower"] = bb_l[i]
-        out.append(row)
+    overlays = []
+    for i in range(len(candles)):
+        overlays.append({
+            "time": candles[i]["time"],
+            "bb_upper": bb_u[i],
+            "bb_middle": bb_m[i],
+            "bb_lower": bb_l[i],
+            "ema20": ema20[i] if i < len(ema20) else None,
+            "ema50": ema50[i] if i < len(ema50) else None,
+            "ema100": ema100[i] if i < len(ema100) else None,
+            "ema200": ema200[i] if i < len(ema200) else None,
+            "rsi14": rsi14[i] if i < len(rsi14) else None,
+            "stoch_k": stoch_k[i],
+            "stoch_d": stoch_d[i],
+            "macd": macd[i] if i < len(macd) else None,
+            "macd_signal": macd_sig[i] if i < len(macd_sig) else None,
+            "macd_hist": macd_hist[i] if i < len(macd_hist) else None,
+        })
 
-    last = out[-1]
-    return {"symbol": symbol.upper(), "last": last, "series": out[-250:]}
+    candles = candles[-300:]
+    overlays = overlays[-300:]
+    last = overlays[-1]
+    return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last}
