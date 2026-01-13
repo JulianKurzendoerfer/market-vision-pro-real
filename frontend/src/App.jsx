@@ -57,7 +57,7 @@ export default function App() {
     layout: { background: { type: "solid", color: "#0b0f19" }, textColor: "#d6d6d6" },
     grid: { vertLines: { color: "rgba(255,255,255,0.06)" }, horzLines: { color: "rgba(255,255,255,0.06)" } },
     rightPriceScale: { borderColor: "rgba(255,255,255,0.10)", minimumWidth: 90, scaleMargins: { top: 0.10, bottom: 0.10 }, textColor: "rgba(255,255,255,0.72)" },
-    timeScale: { borderColor: "rgba(255,255,255,0.15)", visible: timeVisible, rightOffset: 22, barSpacing: 8, lockVisibleTimeRangeOnResize: true },
+    timeScale: { borderColor: "rgba(255,255,255,0.15)", visible: timeVisible, rightOffset: 6, barSpacing: 6, lockVisibleTimeRangeOnResize: true },
     watermark: { visible: true, text: "MVP", fontSize: 18, color: "rgba(255,255,255,0.08)" },
     attributionLogo: false,
     crosshair: { mode: 1 }
@@ -199,10 +199,13 @@ export default function App() {
       macdChart.addLineSeries({ lineWidth: 1, color: "rgba(255,255,255,0.55)", ...noPriceLine }).setData([{ time: t0, value: 0 }, { time: t1, value: 0 }])
 
       mainChart.timeScale().fitContent()
-      applySameRangeFromMain(charts.current)
+      const lr = { from: 0, to: Math.max(0, candles.length - 1) }
+      mainChart.timeScale().setVisibleLogicalRange(lr)
+      rsiChart.timeScale().setVisibleLogicalRange(lr)
+      stochChart.timeScale().setVisibleLogicalRange(lr)
+      macdChart.timeScale().setVisibleLogicalRange(lr)
       syncTimeScales(charts.current)
-
-      removeTVAttribution(mainRef.current)
+removeTVAttribution(mainRef.current)
       removeTVAttribution(rsiRef.current)
       removeTVAttribution(stochRef.current)
       removeTVAttribution(macdRef.current)
