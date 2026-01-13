@@ -1,53 +1,57 @@
-import pandas as pd, numpy as np
+import numpy as np
+import pandas as pd
 
-def ema(s, n): 
-    return s.ewm(span=int(n), adjust=False).mean()
+def ema(s, n): return s.ewm(span=int(n), adjust=False).mean()
 
 def rsi_wilder(close, n=14):
     d = close.diff()
     up = d.clip(lower=0.0)
     dn = -d.clip(upper=0.0)
-    au = up.ewm(alpha=1/n, adjust=False).mean()
-    ad = dn.ewm(alpha=1/n, adjust=False).mean()
-    rs = au / ad.replace(0, np.nan)
+    rs = ema(up, n) / ema(dn, n).replace(0, np.nan)
     return 100 - (100 / (1 + rs))
 
-def macd_w(close, fast=12, slow=26, signal=9):
-    f = close.ewm(span=fast, adjust=False).mean()
-    s = close.ewm(span=slow, adjust=False).mean()
-    m = f - s
-    sig = m.ewm(span=signal, adjust=False).mean()
-    hist = m - sig
-    return m, sig, hist
+def macd(close, fast=12, slow=26, sig=9):
+    ema_f = ema(close, fast)
+    ema_s = ema(close, slow)
+    m = ema_f - ema_s
+    s = ema(m, sig)
+    h = m - s
+    return m, s, h
 
-def true_range(h, l, c):
-    return pd.concat([h-l, (h-c.shift()).abs(), (l-c.shift()).abs()], axis=1).max(axis=1)
+def atr(df, n=14):
+    h, l, c = df['High'], df['Low'], df['Close']
+    prev_c = c.shift(1)
+    tr = pd.concat([(h-l).abs(), (h-prev_c).abs(), (l-prev_c).abs()], axis=1).max(axis=1)
+    return tr.rolling(n).mean()
 
-def atr(h, l, c, n=20):
-    tr = true_range(h, l, c)
-    return tr.ewm(alpha=1/n, adjust=False).mean()
+def bbands(close, n=20, k=2.0):
+    m = close.rolling(n).mean()
+    sd = close.rolling(n).std(ddof=0)
+    up = m + k*sd
+    lo = m - k*sd
+    return m, up, lo
 
-def stoch_rsi(close, rsi_len=14, stoch_len=14, k=3, d=3):
-    r = rsi_wilder(close, rsi_len)
-    rmin = r.rolling(stoch_len).min()
-    rmax = r.rolling(stoch_len).max()
-    sr = 100 * (r - rmin) / (rmax - rmin)
-    kf = sr.rolling(k).mean()
-    df = kf.rolling(d).mean()
-    return kf, df
+def keltner(df, n_ma=20, n_atr=14, mult=2.0):
+    m = df['Close'].rolling(n_ma).mean()
+    a = atr(df, n_atr)
+    up = m + mult*a
+    lo = m - mult*a
+    return m, up, lo
 
 def compute_indicators(df):
-    out = pd.DataFrame(index=df.index)
-    c = df["Close"]; h = df["High"]; l = df["Low"]
-    out["RSI"] = rsi_wilder(c, 14)
-    m, s, hist = macd_w(c, 12, 26, 9)
-    out["MACD"] = m; out["MACD_signal"] = s; out["MACD_hist"] = hist
-    kf, df_ = stoch_rsi(c, 14, 14, 3, 3)
-    out["ST_RSI_K"] = kf; out["ST_RSI_D"] = df_
-    a = atr(h, l, c, 20)
-    out["ATR20"] = a
-    basis = ema(c, 20)
-    out["KC_basis"] = basis
-    out["KC_upper"] = basis + 2*a
-    out["KC_lower"] = basis - 2*a
-    return out
+    df = df.copy()
+    df['RSI'] = rsi_wilder(df['Close'], 14)
+    macd_l, macd_s, macd_h = macd(df['Close'], 12, 26, 9)
+    df['MACD'] = macd_l
+    df['MACD_signal'] = macd_s
+    df['MACD_hist'] = macd_h
+    m, up, lo = bbands(df['Close'], 20, 2.0)
+    df['BB_mid'] = m
+    df['BB_up'] = up
+    df['BB_lo'] = lo
+    km, ku, kl = keltner(df, 20, 14, 2.0)
+    df['KC_mid'] = km
+    df['KC_up'] = ku
+    df['KC_lo'] = kl
+    df['ATR14'] = atr(df, 14)
+    return df[['RSI','MACD','MACD_signal','MACD_hist','BB_mid','BB_up','BB_lo','KC_mid','KC_up','KC_lo','ATR14']]
