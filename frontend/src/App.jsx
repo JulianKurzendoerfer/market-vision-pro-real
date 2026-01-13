@@ -1,19 +1,45 @@
-import { useEffect, useState } from "react"
-export default function App(){
-  const [status,setStatus]=useState("loading...")
-  const [sample,setSample]=useState([])
-  const api=import.meta.env.VITE_API_BASE
-  useEffect(()=>{
-    fetch(`${api}/health`).then(r=>r.json()).then(()=>setStatus("ok")).catch(()=>setStatus("down"))
-    fetch(`${api}/v1/bundle?symbol=AAPL&range=1y&interval=1d`).then(r=>r.json()).then(j=>setSample(j.ohlc?.slice(0,3)||[])).catch(()=>setSample([]))
-  },[])
-  return (<div style={{fontFamily:"Inter,system-ui",padding:24}}>
-    <h1>Market Vision Pro</h1>
-    <p>Backend: {status}</p>
-    <pre>{JSON.stringify(sample,null,2)}</pre>
-    <button onClick={async()=>{
-      const r=await fetch(`${api}/v1/compute`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol:"AAPL",range:"1y",interval:"1d"})})
-      const j=await r.json(); alert(j.ok?`RSI: ${j.indicators.at(-1).RSI.toFixed(2)}`:"compute failed")
-    }}>Compute</button>
-  </div>)
+import { useEffect, useMemo, useState } from "react"
+
+export default function App() {
+  const apiBase = useMemo(() => {
+    const v = import.meta.env.VITE_API_BASE
+    return (v && v.trim()) ? v.trim().replace(/\/+$/, "") : ""
+  }, [])
+
+  const [health, setHealth] = useState(null)
+  const [ping, setPing] = useState(null)
+  const [err, setErr] = useState("")
+
+  useEffect(() => {
+    const run = async () => {
+      setErr("")
+      try {
+        const h = await fetch(`${apiBase}/health`)
+        const hj = await h.json()
+        setHealth(hj)
+      } catch (e) {
+        setErr(String(e))
+      }
+      try {
+        const p = await fetch(`${apiBase}/api/ping`)
+        const pj = await p.json()
+        setPing(pj)
+      } catch (e) {
+        setErr(prev => (prev ? prev : String(e)))
+      }
+    }
+    run()
+  }, [apiBase])
+
+  return (
+    <div style={{ fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial", padding: 24 }}>
+      <h1>MVP Frontend</h1>
+      <div style={{ marginTop: 12 }}>
+        <div><b>API_BASE</b>: {apiBase}</div>
+        <div style={{ marginTop: 12 }}><b>/health</b>: {health ? JSON.stringify(health) : "-"}</div>
+        <div style={{ marginTop: 12 }}><b>/api/ping</b>: {ping ? JSON.stringify(ping) : "-"}</div>
+        {err ? <div style={{ marginTop: 12, color: "crimson" }}><b>Fehler</b>: {err}</div> : null}
+      </div>
+    </div>
+  )
 }
