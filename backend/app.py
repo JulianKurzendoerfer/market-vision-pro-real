@@ -39,10 +39,7 @@ def _sma(values, period):
         s += v
         if i >= period:
             s -= values[i - period]
-        if i + 1 < period:
-            out.append(None)
-        else:
-            out.append(s / period)
+        out.append(None if i + 1 < period else s / period)
     return out
 
 def _std(values, period):
@@ -60,8 +57,7 @@ def _std(values, period):
 def _bb(values, period=20, std_mul=2.0):
     mid = _sma(values, period)
     sd = _std(values, period)
-    upper = []
-    lower = []
+    upper, lower = [], []
     for m, s in zip(mid, sd):
         if m is None or s is None:
             upper.append(None)
@@ -95,38 +91,20 @@ def _macd(values, fast=12, slow=26, signal=9):
     hist = [m - s for m, s in zip(macd_line, signal_line)]
     return macd_line, signal_line, hist
 
-def _stoch(highs, lows, closes, period=14, smooth_k=1, smooth_d=3):
-    k_raw = [None] * len(closes)
+def _stoch(highs, lows, closes, period=14, smooth_d=3):
+    k = [None] * len(closes)
     for i in range(len(closes)):
         if i + 1 < period:
             continue
         hh = max(highs[i - period + 1 : i + 1])
         ll = min(lows[i - period + 1 : i + 1])
         denom = (hh - ll)
-        if denom == 0:
-            k_raw[i] = 0.0
-        else:
-            k_raw[i] = 100.0 * (closes[i] - ll) / denom
-    k_vals = []
-    for v in k_raw:
-        k_vals.append(v)
-    if smooth_k > 1:
-        tmp = []
-        for i in range(len(k_vals)):
-            if k_vals[i] is None:
-                tmp.append(None)
-                continue
-            window = [x for x in k_vals[max(0, i - smooth_k + 1): i + 1] if x is not None]
-            tmp.append(sum(window) / len(window) if window else None)
-        k_vals = tmp
-    d_vals = []
-    for i in range(len(k_vals)):
-        if k_vals[i] is None:
-            d_vals.append(None)
-            continue
-        window = [x for x in k_vals[max(0, i - smooth_d + 1): i + 1] if x is not None]
-        d_vals.append(sum(window) / len(window) if window else None)
-    return k_vals, d_vals
+        k[i] = 0.0 if denom == 0 else 100.0 * (closes[i] - ll) / denom
+    d = [None] * len(closes)
+    for i in range(len(closes)):
+        window = [x for x in k[max(0, i - smooth_d + 1): i + 1] if x is not None]
+        d[i] = (sum(window) / len(window)) if window else None
+    return k, d
 
 app = FastAPI()
 app.add_middleware(
@@ -141,18 +119,11 @@ app.add_middleware(
 def health():
     return {"status": "ok"}
 
-@app.get("/api/quote")
-def quote(symbol: str = Query(..., min_length=1, max_length=32)):
-    data = _get(f"real-time/{symbol}", {})
-    if isinstance(data, dict) and data.get("code") and data.get("message"):
-        raise HTTPException(status_code=502, detail=f"EODHD: {data.get('message')}")
-    return data
-
 @app.get("/api/tv")
 def tv(
     symbol: str = Query(..., min_length=1, max_length=32),
     period: str = Query("d", pattern="^(d|w|m)$"),
-    days: int = Query(420, ge=120, le=5000),
+    days: int = Query(520, ge=120, le=5000),
 ):
     to_d = date.today()
     from_d = to_d - timedelta(days=days)
@@ -169,14 +140,17 @@ def tv(
 
     for r in raw_sorted:
         d = r.get("date")
-        o, h, l, c = r.get("open"), r.get("high"), r.get("low"), r.get("close")
-        if d is None or c is None or h is None or l is None:
+        o = r.get("open")
+        h = r.get("high")
+        l = r.get("low")
+        c = r.get("close")
+        if d is None or h is None or l is None or c is None:
             continue
         try:
-            o = float(o) if o is not None else None
+            c = float(c)
             h = float(h)
             l = float(l)
-            c = float(c)
+            o = float(o) if o is not None else c
         except Exception:
             continue
         candles.append({"time": d, "open": o, "high": h, "low": l, "close": c})
@@ -193,13 +167,14 @@ def tv(
     ema100 = _ema(closes, 100)
     ema200 = _ema(closes, 200)
     rsi14 = _rsi(closes, 14)
-    stoch_k, stoch_d = _stoch(highs, lows, closes, 14, 1, 3)
+    stoch_k, stoch_d = _stoch(highs, lows, closes, 14, 3)
     macd, macd_sig, macd_hist = _macd(closes, 12, 26, 9)
 
     overlays = []
     for i in range(len(candles)):
         overlays.append({
             "time": candles[i]["time"],
+            "close": closes[i],
             "bb_upper": bb_u[i],
             "bb_middle": bb_m[i],
             "bb_lower": bb_l[i],
