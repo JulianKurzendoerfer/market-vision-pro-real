@@ -153,12 +153,12 @@ export default function App() {
       const t1 = candles[candles.length - 1].time
 
       const levels = Array.isArray(data.levels) ? data.levels : []
-      const SR_COLOR = "rgba(255,255,255,0.70)"
+      const SR_COLOR = "rgba(255,255,255,0.28)"
       const fmt = (v) => Number(v).toFixed(2)
       for (const lvl of levels) {
         if (!lvl || !isNum(lvl.value)) continue
         const strength = Math.max(1, Number(lvl.strength || 1))
-        const width = strength >= 6 ? 6 : strength >= 4 ? 5 : strength >= 3 ? 4 : 3
+        const width = strength >= 6 ? 3 : strength >= 4 ? 2 : 1
         cs.createPriceLine({
           price: Number(lvl.value),
           color: SR_COLOR,
