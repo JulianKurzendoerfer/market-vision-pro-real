@@ -237,7 +237,7 @@ def tv(
     ema100 = _ema(closes, 100)
     ema200 = _ema(closes, 200)
     rsi14 = _rsi(closes, 14)
-    stoch_k, stoch_d = _stoch(highs, lows, closes, 14, 3)
+    stoch_k, stoch_d = _stoch(highs, lows, closes, 14, 3, 3)
     macd, macd_sig, macd_hist = _macd(closes, 12, 26, 9)
     overlays = []
     for i in range(len(candles)):
