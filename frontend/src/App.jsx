@@ -56,7 +56,7 @@ export default function App() {
     height: h,
     layout: { background: { type: "solid", color: "#0b0f19" }, textColor: "#d6d6d6" },
     grid: { vertLines: { color: "rgba(255,255,255,0.06)" }, horzLines: { color: "rgba(255,255,255,0.06)" } },
-    rightPriceScale: { borderColor: "rgba(255,255,255,0.15)", minimumWidth: 90, scaleMargins: { top: 0.10, bottom: 0.10 } },
+    rightPriceScale: { borderColor: "rgba(255,255,255,0.10)", minimumWidth: 90, scaleMargins: { top: 0.10, bottom: 0.10 }, textColor: "rgba(255,255,255,0.72)" },
     timeScale: { borderColor: "rgba(255,255,255,0.15)", visible: timeVisible, rightOffset: 22, barSpacing: 8, lockVisibleTimeRangeOnResize: true },
     watermark: { visible: true, text: "MVP", fontSize: 18, color: "rgba(255,255,255,0.08)" },
     attributionLogo: false,
@@ -149,12 +149,12 @@ export default function App() {
       safeSet(e200, lineData(overlays, "ema200"))
 
       const levels = Array.isArray(data.levels) ? data.levels : []
-      const SR_COLOR = "rgba(255,255,255,0.18)"
+      const SR_COLOR = "rgba(255,255,255,0.24)"
       const fmt = (v) => Number(v).toFixed(2)
       for (const lvl of levels) {
         if (!lvl || !isNum(lvl.value)) continue
         const strength = Math.max(1, Number(lvl.strength || 1))
-        const width = strength >= 6 ? 3 : strength >= 4 ? 2 : 1
+        const width = strength >= 6 ? 4 : strength >= 4 ? 3 : 2
         cs.createPriceLine({
           price: Number(lvl.value),
           color: SR_COLOR,
