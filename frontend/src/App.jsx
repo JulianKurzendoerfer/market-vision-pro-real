@@ -4,19 +4,22 @@ import { createChart } from "lightweight-charts"
 const API = "https://market-vision-pro-real.onrender.com"
 
 const isNum = (v) => Number.isFinite(Number(v))
+const isTime = (t) => typeof t === "string" && t.length >= 8
+
+const cleanCandles = (candles) =>
+  (candles || [])
+    .filter(b => isTime(b.time) && isNum(b.open) && isNum(b.high) && isNum(b.low) && isNum(b.close))
+    .map(b => ({ time: b.time, open: Number(b.open), high: Number(b.high), low: Number(b.low), close: Number(b.close) }))
 
 const lineData = (overlays, key) =>
-  overlays
-    .filter(x => isNum(x[key]))
+  (overlays || [])
+    .filter(x => isTime(x.time) && isNum(x[key]))
     .map(x => ({ time: x.time, value: Number(x[key]) }))
 
 const histData = (overlays, key) =>
-  overlays
-    .filter(x => isNum(x[key]))
-    .map(x => {
-      const value = Number(x[key])
-      return { time: x.time, value }
-    })
+  (overlays || [])
+    .filter(x => isTime(x.time) && isNum(x[key]))
+    .map(x => ({ time: x.time, value: Number(x[key]) }))
 
 export default function App() {
   const [symbol, setSymbol] = useState("AAPL.US")
@@ -29,15 +32,9 @@ export default function App() {
   const rsiRef = useRef(null)
   const stochRef = useRef(null)
   const macdRef = useRef(null)
-
   const charts = useRef({})
 
-  const heights = useMemo(() => ({
-    main: 420,
-    rsi: 140,
-    stoch: 170,
-    macd: 170
-  }), [])
+  const heights = useMemo(() => ({ main: 420, rsi: 140, stoch: 170, macd: 170 }), [])
 
   const baseOpts = (w, h, showTime) => ({
     width: w,
@@ -46,7 +43,8 @@ export default function App() {
     grid: { vertLines: { color: "rgba(255,255,255,0.06)" }, horzLines: { color: "rgba(255,255,255,0.06)" } },
     rightPriceScale: { borderColor: "rgba(255,255,255,0.15)" },
     timeScale: { borderColor: "rgba(255,255,255,0.15)", visible: showTime },
-    watermark: { visible: false }
+    watermark: { visible: false },
+    attributionLogo: false
   })
 
   function destroy() {
@@ -67,6 +65,10 @@ export default function App() {
     })
   }
 
+  function safeSetData(series, data) {
+    try { series.setData(data) } catch {}
+  }
+
   async function run() {
     setErr("")
     setLoading(true)
@@ -74,59 +76,65 @@ export default function App() {
       const r = await fetch(`${API}/api/tv?symbol=${encodeURIComponent(symbol)}&days=520&period=d`)
       if (!r.ok) throw new Error(await r.text())
       const data = await r.json()
-      setLast(data.last || null)
 
+      const candles = cleanCandles(data.candles)
+      const overlays = (data.overlays || []).filter(x => isTime(x.time))
+
+      if (candles.length < 50) throw new Error("Zu wenig Candles (oder fehlerhafte Daten).")
+
+      setLast(data.last || null)
       destroy()
 
       const w = wrapRef.current?.clientWidth || 1000
 
-      const mainChart = createChart(mainRef.current, baseOpts(w, heights.main, false))
-      const rsiChart  = createChart(rsiRef.current,  baseOpts(w, heights.rsi, false))
-      const stochChart= createChart(stochRef.current,baseOpts(w, heights.stoch, false))
-      const macdChart = createChart(macdRef.current, baseOpts(w, heights.macd, true))
+      const mainChart  = createChart(mainRef.current,  baseOpts(w, heights.main, false))
+      const rsiChart   = createChart(rsiRef.current,   baseOpts(w, heights.rsi, false))
+      const stochChart = createChart(stochRef.current, baseOpts(w, heights.stoch, false))
+      const macdChart  = createChart(macdRef.current,  baseOpts(w, heights.macd, true))
 
       charts.current = { mainChart, rsiChart, stochChart, macdChart }
       syncTime(charts.current)
 
-      const candles = mainChart.addCandlestickSeries()
-      candles.setData(data.candles)
+      const cs = mainChart.addCandlestickSeries()
+      cs.setData(candles)
 
       const bbU = mainChart.addLineSeries({ lineWidth: 1 })
       const bbM = mainChart.addLineSeries({ lineWidth: 1 })
       const bbL = mainChart.addLineSeries({ lineWidth: 1 })
-      bbU.setData(lineData(data.overlays, "bb_upper"))
-      bbM.setData(lineData(data.overlays, "bb_middle"))
-      bbL.setData(lineData(data.overlays, "bb_lower"))
+      safeSetData(bbU, lineData(overlays, "bb_upper"))
+      safeSetData(bbM, lineData(overlays, "bb_middle"))
+      safeSetData(bbL, lineData(overlays, "bb_lower"))
 
-      const e20 = mainChart.addLineSeries({ lineWidth: 1 })
-      const e50 = mainChart.addLineSeries({ lineWidth: 1 })
+      const e20  = mainChart.addLineSeries({ lineWidth: 1 })
+      const e50  = mainChart.addLineSeries({ lineWidth: 1 })
       const e100 = mainChart.addLineSeries({ lineWidth: 1 })
       const e200 = mainChart.addLineSeries({ lineWidth: 1 })
-      e20.setData(lineData(data.overlays, "ema20"))
-      e50.setData(lineData(data.overlays, "ema50"))
-      e100.setData(lineData(data.overlays, "ema100"))
-      e200.setData(lineData(data.overlays, "ema200"))
+      safeSetData(e20,  lineData(overlays, "ema20"))
+      safeSetData(e50,  lineData(overlays, "ema50"))
+      safeSetData(e100, lineData(overlays, "ema100"))
+      safeSetData(e200, lineData(overlays, "ema200"))
+
+      const t0 = overlays[0]?.time || candles[0].time
+      const t1 = overlays[overlays.length - 1]?.time || candles[candles.length - 1].time
 
       const rsi = rsiChart.addLineSeries({ lineWidth: 2 })
-      rsi.setData(lineData(data.overlays, "rsi14"))
-      const t0 = data.overlays[0].time
-      const t1 = data.overlays[data.overlays.length - 1].time
-      rsiChart.addLineSeries({ lineWidth: 1 }).setData([{ time: t0, value: 70 }, { time: t1, value: 70 }])
-      rsiChart.addLineSeries({ lineWidth: 1 }).setData([{ time: t0, value: 30 }, { time: t1, value: 30 }])
+      safeSetData(rsi, lineData(overlays, "rsi14"))
+      safeSetData(rsiChart.addLineSeries({ lineWidth: 1 }), [{ time: t0, value: 70 }, { time: t1, value: 70 }])
+      safeSetData(rsiChart.addLineSeries({ lineWidth: 1 }), [{ time: t0, value: 30 }, { time: t1, value: 30 }])
 
       const k = stochChart.addLineSeries({ lineWidth: 2 })
       const dline = stochChart.addLineSeries({ lineWidth: 2 })
-      k.setData(lineData(data.overlays, "stoch_k"))
-      dline.setData(lineData(data.overlays, "stoch_d"))
-      stochChart.addLineSeries({ lineWidth: 1 }).setData([{ time: t0, value: 80 }, { time: t1, value: 80 }])
-      stochChart.addLineSeries({ lineWidth: 1 }).setData([{ time: t0, value: 20 }, { time: t1, value: 20 }])
+      safeSetData(k, lineData(overlays, "stoch_k"))
+      safeSetData(dline, lineData(overlays, "stoch_d"))
+      safeSetData(stochChart.addLineSeries({ lineWidth: 1 }), [{ time: t0, value: 80 }, { time: t1, value: 80 }])
+      safeSetData(stochChart.addLineSeries({ lineWidth: 1 }), [{ time: t0, value: 20 }, { time: t1, value: 20 }])
 
       const hist = macdChart.addHistogramSeries()
       const macd = macdChart.addLineSeries({ lineWidth: 2 })
-      const sig = macdChart.addLineSeries({ lineWidth: 2 })
-      hist.setData(histData(data.overlays, "macd_hist"))
-      macd.setData(lineData(data.overlays, "macd"))
-      sig.setData(lineData(data.overlays, "macd_signal"))
+      const sig  = macdChart.addLineSeries({ lineWidth: 2 })
+      safeSetData(hist, histData(overlays, "macd_hist"))
+      safeSetData(macd, lineData(overlays, "macd"))
+      safeSetData(sig,  lineData(overlays, "macd_signal"))
 
       mainChart.timeScale().fitContent()
     } catch (e) {
