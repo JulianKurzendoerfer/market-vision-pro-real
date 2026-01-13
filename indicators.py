@@ -1,66 +1,56 @@
-import numpy as np
-import pandas as pd
+import numpy as np, pandas as pd
 
-def ema(s, n):
-    return s.ewm(span=int(n), adjust=False).mean()
+def ema(s, n): return s.ewm(span=int(n), adjust=False).mean()
 
 def rsi_wilder(close, n=14):
-    d = close.diff()
-    up = d.clip(lower=0.0)
-    dn = -d.clip(upper=0.0)
-    avg_gain = up.ewm(alpha=1/n, adjust=False).mean()
-    avg_loss = dn.ewm(alpha=1/n, adjust=False).mean()
-    rs = avg_gain / (avg_loss.replace(0, np.nan))
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(50)
+    d=close.diff()
+    up=d.clip(lower=0)
+    dn=-d.clip(upper=0)
+    rs=ema(up,n)/ema(dn,n)
+    return 100-(100/(1+rs))
 
-def macd(close, fast=12, slow=26, signal=9):
-    ema_fast = ema(close, fast)
-    ema_slow = ema(close, slow)
-    m = ema_fast - ema_slow
-    s = ema(m, signal)
-    h = m - s
-    return m, s, h
+def macd(cv, f=12, s=26, m=9):
+    f_=ema(cv,f); s_=ema(cv,s); m_=ema(f_-s_,m)
+    return f_-s_, m_, f_-s_-m_
 
-def bbands(close, n=20, k=2):
-    ma = close.rolling(int(n)).mean()
-    sd = close.rolling(int(n)).std(ddof=0)
-    upper = ma + k * sd
-    lower = ma - k * sd
-    return ma, upper, lower
+def stoch_rsi(c, k=14, d=3, s=3):
+    r=rsi_wilder(c,k)
+    st=(r-r.rolling(k).min())/(r.rolling(k).max()-r.rolling(k).min())
+    kf=st.rolling(d).mean()
+    df=kf.rolling(s).mean()
+    return kf, df
 
-def atr(h, l, c, n=14):
-    prev_c = c.shift(1)
-    tr = pd.concat([(h - l).abs(), (h - prev_c).abs(), (l - prev_c).abs()], axis=1).max(axis=1)
-    return tr.rolling(int(n)).mean()
+def atr(h,l,c,n=14):
+    tr=pd.concat([(h-l).abs(), (h-c.shift()).abs(), (l-c.shift()).abs()], axis=1).max(axis=1)
+    return tr.rolling(n).mean()
 
-def keltner_channels(h, l, c, n=20, atr_n=14, mult=2):
-    basis = c.rolling(int(n)).mean()
-    rng = atr(h, l, c, atr_n)
-    upper = basis + mult * rng
-    lower = basis - mult * rng
-    return basis, upper, lower
+def psar(h,l, af=0.02, af_max=0.2):
+    sar=h.copy()*0; bull=True; ep=l.iloc[0]; sar.iloc[0]=l.iloc[0]; a=af
+    for i in range(1,len(h)):
+        prev=sar.iloc[i-1]
+        sar.iloc[i]=prev+a*(ep-prev)
+        if bull:
+            if l.iloc[i]<sar.iloc[i]:
+                bull=False; sar.iloc[i]=ep; ep=l.iloc[i]; a=0.02
+            else:
+                if h.iloc[i]>ep: ep=h.iloc[i]; a=min(af_max,a+af)
+                sar.iloc[i]=min(sar.iloc[i], l.iloc[i-1], l.iloc[i-2] if i>1 else l.iloc[i-1])
+        else:
+            if h.iloc[i]>sar.iloc[i]:
+                bull=True; sar.iloc[i]=ep; ep=h.iloc[i]; a=0.02
+            else:
+                if l.iloc[i]<ep: ep=l.iloc[i]; a=min(af_max,a+af)
+                sar.iloc[i]=max(sar.iloc[i], h.iloc[i-1], h.iloc[i-2] if i>1 else h.iloc[i-1])
+    return sar
 
-def stoch_rsi(close, n=14, k=3, d=3):
-    r = rsi_wilder(close, n)
-    low = r.rolling(int(n)).min()
-    high = r.rolling(int(n)).max()
-    stoch = (r - low) / (high - low).replace(0, np.nan)
-    kf = stoch.rolling(int(k)).mean()
-    df = kf.rolling(int(d)).mean()
-    return (kf * 100), (df * 100)
-
-def compute_indicators(df):
-    out = {}
-    c = df["Close"]; h = df["High"]; l = df["Low"]
-    out["EMA20"] = ema(c, 20)
-    out["EMA50"] = ema(c, 50)
-    out["EMA200"] = ema(c, 200)
-    out["RSI"] = rsi_wilder(c, 14)
-    m, s, hst = macd(c, 12, 26, 9)
-    out["MACD"] = m; out["MACD_signal"] = s; out["MACD_hist"] = hst
-    b, u, d = bbands(c, 20, 2); out["BB_basis"] = b; out["BB_upper"] = u; out["BB_lower"] = d
-    out["ATR20"] = atr(h, l, c, 20)
-    kb, ku, kl = keltner_channels(h, l, c, 20, 14, 2); out["KC_basis"] = kb; out["KC_upper"] = ku; out["KC_lower"] = kl
-    kf, df_ = stoch_rsi(c, 14, 3, 3); out["ST_RSI_K"] = kf; out["ST_RSI_D"] = df_
-    return out
+def compute(df):
+    c=df["Close"]; h=df["High"]; l=df["Low"]
+    out=pd.DataFrame(index=df.index)
+    out["EMA20"]=ema(c,20); out["EMA50"]=ema(c,50); out["EMA200"]=ema(c,200)
+    out["RSI"]=rsi_wilder(c,14)
+    mc, ms, mh = macd(c)
+    out["MACD"]=mc; out["MACD_sig"]=ms; out["MACD_hist"]=mh
+    kf, df_ = stoch_rsi(c,14,3,3)
+    out["ST_RSI_K"]=kf; out["ST_RSI_D"]=df_
+    out["ATR20"]=atr(h,l,c,20)
+    return out.reset_index()
