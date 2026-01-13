@@ -8,7 +8,7 @@ const isTime = (t) => typeof t === "string" && t.length >= 8
 
 const cleanCandles = (candles) =>
   (candles || [])
-    .filter(b => isTime(b.time) && isNum(b.open) && isNum(b.high) && isNum(b.low) && isNum(b.close))
+    .filter(b => isTime(b.time) && isNum(b.open) && isNum(b.high) && isNum(b.low) && isNum(b.close) && Number(b.high) > 0 && Number(b.low) > 0 && Number(b.close) > 0 && Number(b.high) >= Number(b.low))
     .map(b => ({ time: b.time, open: +b.open, high: +b.high, low: +b.low, close: +b.close }))
 
 const lineData = (overlays, key) =>
