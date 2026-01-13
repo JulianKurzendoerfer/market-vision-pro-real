@@ -106,7 +106,7 @@ export default function App() {
     setErr("")
     setLoading(true)
     try {
-      const r = await fetch(`${API}/api/tv?symbol=${encodeURIComponent(symbol)}&days=520&period=d`)
+      const r = await fetch(`${API}/api/tv?symbol=${encodeURIComponent(symbol)}&period=d&full=1`)
       if (!r.ok) throw new Error(await r.text())
       const data = await r.json()
 
