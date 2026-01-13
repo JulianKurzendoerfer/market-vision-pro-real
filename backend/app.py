@@ -15,13 +15,24 @@ def _key() -> str:
 
 def _get(path: str, params: dict):
     params = {**params, "api_token": _key(), "fmt": "json"}
-    r = requests.get(f"{EODHD_BASE}/{path}", params=params, timeout=25)
+    r = requests.get(f"{EODHD_BASE}/{path}", params=params, timeout=40)
     if r.status_code != 200:
         raise HTTPException(status_code=502, detail=f"EODHD error {r.status_code}: {r.text[:300]}")
     try:
         return r.json()
     except Exception:
         raise HTTPException(status_code=502, detail="EODHD returned non-JSON response")
+
+def _get_eod_chunked(symbol: str, period: str, start: date, end: date, chunk_days: int = 3650):
+    out = []
+    cur = start
+    while cur <= end:
+        to_d = min(end, cur + timedelta(days=chunk_days))
+        raw = _get(f"eod/{symbol}", {"from": cur.isoformat(), "to": to_d.isoformat(), "period": period})
+        if isinstance(raw, list) and raw:
+            out.extend(raw)
+        cur = to_d + timedelta(days=1)
+    return out
 
 def _ema(values, span):
     if not values:
@@ -106,6 +117,58 @@ def _stoch(highs, lows, closes, period=14, smooth_d=3):
         d[i] = (sum(window) / len(window)) if window else None
     return k, d
 
+def _sr_levels(candles, pivot_left=6, pivot_right=6, tol_pct=0.003, max_levels=18):
+    if not candles or len(candles) < (pivot_left + pivot_right + 10):
+        return []
+    pivots = []
+    n = len(candles)
+    for i in range(pivot_left, n - pivot_right):
+        lo = candles[i]["low"]
+        hi = candles[i]["high"]
+        is_low = True
+        is_high = True
+        for j in range(i - pivot_left, i + pivot_right + 1):
+            if candles[j]["low"] < lo:
+                is_low = False
+            if candles[j]["high"] > hi:
+                is_high = False
+            if not is_low and not is_high:
+                break
+        if is_low:
+            pivots.append(("support", float(lo)))
+        if is_high:
+            pivots.append(("resistance", float(hi)))
+    if not pivots:
+        return []
+    supports = [p[1] for p in pivots if p[0] == "support"]
+    resistances = [p[1] for p in pivots if p[0] == "resistance"]
+    def cluster(values):
+        values = sorted(values)
+        clusters = []
+        for v in values:
+            placed = False
+            for c in clusters:
+                mid = c["sum"] / c["count"]
+                if abs(v - mid) / mid <= tol_pct:
+                    c["sum"] += v
+                    c["count"] += 1
+                    placed = True
+                    break
+            if not placed:
+                clusters.append({"sum": v, "count": 1})
+        out = [{"value": c["sum"] / c["count"], "strength": c["count"]} for c in clusters]
+        out.sort(key=lambda x: (-x["strength"], -x["value"]))
+        return out
+    sup = cluster(supports)
+    res = cluster(resistances)
+    all_lvls = []
+    for x in sup:
+        all_lvls.append({"type": "support", "value": round(float(x["value"]), 6), "strength": int(x["strength"])})
+    for x in res:
+        all_lvls.append({"type": "resistance", "value": round(float(x["value"]), 6), "strength": int(x["strength"])})
+    all_lvls.sort(key=lambda x: (-x["strength"], x["type"]))
+    return all_lvls[:max_levels]
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -122,23 +185,21 @@ def health():
 @app.get("/api/tv")
 def tv(
     symbol: str = Query(..., min_length=1, max_length=32),
-    period: str = Query("d", pattern="^(d|w|m) ),
+    period: str = Query("d", pattern="^(d|w|m)$"),
     full: int = Query(1, ge=0, le=1),
     days: int = Query(520, ge=120, le=80000),
 ):
     to_d = date.today()
-    from_d = date(1900, 1, 1) if int(full) == 1 else (to_d - timedelta(days=days))
-    raw = _get(
-        f"eod/{symbol}",
-        {"from": from_d.isoformat(), "to": to_d.isoformat(), "period": period},
-    )
+    if int(full) == 1:
+        raw = _get_eod_chunked(symbol, period, date(1900, 1, 1), to_d, 3650)
+    else:
+        from_d = to_d - timedelta(days=days)
+        raw = _get(f"eod/{symbol}", {"from": from_d.isoformat(), "to": to_d.isoformat(), "period": period})
     if not isinstance(raw, list) or len(raw) == 0:
         raise HTTPException(status_code=502, detail="No candle data returned")
-
     raw_sorted = sorted(raw, key=lambda x: x.get("date", ""))
     candles = []
     closes, highs, lows = [], [], []
-
     for r in raw_sorted:
         d = r.get("date")
         o = r.get("open")
@@ -158,10 +219,8 @@ def tv(
         closes.append(c)
         highs.append(h)
         lows.append(l)
-
     if len(candles) < 120:
         raise HTTPException(status_code=502, detail="Not enough candle data")
-
     bb_u, bb_m, bb_l = _bb(closes, 20, 2.0)
     ema20 = _ema(closes, 20)
     ema50 = _ema(closes, 50)
@@ -170,7 +229,6 @@ def tv(
     rsi14 = _rsi(closes, 14)
     stoch_k, stoch_d = _stoch(highs, lows, closes, 14, 3)
     macd, macd_sig, macd_hist = _macd(closes, 12, 26, 9)
-
     overlays = []
     for i in range(len(candles)):
         overlays.append({
@@ -190,76 +248,6 @@ def tv(
             "macd_signal": macd_sig[i] if i < len(macd_sig) else None,
             "macd_hist": macd_hist[i] if i < len(macd_hist) else None,
         })
-
-    candles = candles[-300:]
-    overlays = overlays[-300:]
     last = overlays[-1]
     levels = _sr_levels(candles)
     return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels}
-
-def _sr_levels(candles, pivot_left=6, pivot_right=6, tol_pct=0.003, max_levels=18):
-    if not candles or len(candles) < (pivot_left + pivot_right + 10):
-        return []
-
-    pivots = []
-    n = len(candles)
-
-    for i in range(pivot_left, n - pivot_right):
-        lo = candles[i]["low"]
-        hi = candles[i]["high"]
-
-        is_low = True
-        is_high = True
-
-        for j in range(i - pivot_left, i + pivot_right + 1):
-            if candles[j]["low"] < lo:
-                is_low = False
-            if candles[j]["high"] > hi:
-                is_high = False
-            if not is_low and not is_high:
-                break
-
-        if is_low:
-            pivots.append(("support", float(lo)))
-        if is_high:
-            pivots.append(("resistance", float(hi)))
-
-    if not pivots:
-        return []
-
-    supports = [p[1] for p in pivots if p[0] == "support"]
-    resistances = [p[1] for p in pivots if p[0] == "resistance"]
-
-    def cluster(values):
-        values = sorted(values)
-        clusters = []
-        for v in values:
-            placed = False
-            for c in clusters:
-                mid = c["sum"] / c["count"]
-                if abs(v - mid) / mid <= tol_pct:
-                    c["sum"] += v
-                    c["count"] += 1
-                    placed = True
-                    break
-            if not placed:
-                clusters.append({"sum": v, "count": 1})
-        out = []
-        for c in clusters:
-            out.append({"value": c["sum"] / c["count"], "strength": c["count"]})
-        out.sort(key=lambda x: (-x["strength"], -x["value"]))
-        return out
-
-    sup = cluster(supports)
-    res = cluster(resistances)
-
-    all_lvls = []
-    for x in sup:
-        all_lvls.append({"type": "support", "value": round(float(x["value"]), 6), "strength": int(x["strength"])})
-    for x in res:
-        all_lvls.append({"type": "resistance", "value": round(float(x["value"]), 6), "strength": int(x["strength"])})
-
-    all_lvls.sort(key=lambda x: (-x["strength"], x["type"]))
-    all_lvls = all_lvls[:max_levels]
-
-    return all_lvls
