@@ -1,26 +1,20 @@
 services:
   - type: web
-    name: mvp-backend
+    name: market-vision-pro-real
     env: python
     plan: free
-    rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.6
-      - key: ALLOWED_ORIGINS
-        value: "*"
+    startCommand: gunicorn -k uvicorn.workers.UvicornWorker backend.main:app --bind 0.0.0.0:$PORT
+    healthCheckPath: /health
 
   - type: web
-    name: mvp-frontend
+    name: market-vision-pro-real-front
     env: static
-    plan: free
-    rootDir: frontend
-    buildCommand: npm ci && npm run build
-    staticPublishPath: dist
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
     envVars:
-      - key: NODE_VERSION
-        value: 20.11.1
-      - key: VITE_API_BASE
-        value: https://mvp-backend.onrender.com
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: market-vision-pro-real
+          property: url
