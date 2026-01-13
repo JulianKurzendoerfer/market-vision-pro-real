@@ -23,16 +23,23 @@ def _get(path: str, params: dict):
     except Exception:
         raise HTTPException(status_code=502, detail="EODHD returned non-JSON response")
 
-def _get_eod_chunked(symbol: str, period: str, start: date, end: date, chunk_days: int = 3650):
-    out = []
-    cur = start
-    while cur <= end:
-        to_d = min(end, cur + timedelta(days=chunk_days))
-        raw = _get(f"eod/{symbol}", {"from": cur.isoformat(), "to": to_d.isoformat(), "period": period})
-        if isinstance(raw, list) and raw:
-            out.extend(raw)
-        cur = to_d + timedelta(days=1)
-    return out
+def _get_fundamentals(symbol: str):
+    return _get(f"fundamentals/{symbol}", {})
+
+def _ipo_date(symbol: str):
+    try:
+        f = _get_fundamentals(symbol)
+        d = None
+        if isinstance(f, dict):
+            g = f.get("General") if isinstance(f.get("General"), dict) else None
+            if g:
+                d = g.get("IPODate") or g.get("IPO_Date") or g.get("IPO")
+        if isinstance(d, str) and len(d) >= 10:
+            y,m,dd = d[:10].split("-")
+            return date(int(y), int(m), int(dd))
+    except Exception:
+        pass
+    return date(1970,1,1)
 
 def _ema(values, span):
     if not values:
@@ -191,7 +198,8 @@ def tv(
 ):
     to_d = date.today()
     if int(full) == 1:
-        raw = _get_eod_chunked(symbol, period, date(1900, 1, 1), to_d, 3650)
+        start = _ipo_date(symbol)
+        raw = _get(f"eod/{symbol}", {"from": start.isoformat(), "to": to_d.isoformat(), "period": period})
     else:
         from_d = to_d - timedelta(days=days)
         raw = _get(f"eod/{symbol}", {"from": from_d.isoformat(), "to": to_d.isoformat(), "period": period})
