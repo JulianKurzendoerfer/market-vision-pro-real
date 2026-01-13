@@ -42,19 +42,13 @@ export default function App() {
     layout: { background: { type: "solid", color: "#0b0f19" }, textColor: "#d6d6d6" },
     grid: { vertLines: { color: "rgba(255,255,255,0.06)" }, horzLines: { color: "rgba(255,255,255,0.06)" } },
     rightPriceScale: { borderColor: "rgba(255,255,255,0.15)" },
-    timeScale: {
-      borderColor: "rgba(255,255,255,0.15)",
-      visible: timeVisible,
-      rightOffset: 5,
-      barSpacing: 8,
-      fixLeftEdge: false,
-      fixRightEdge: false,
-      lockVisibleTimeRangeOnResize: true
-    },
+    timeScale: { borderColor: "rgba(255,255,255,0.15)", visible: timeVisible, rightOffset: 5, barSpacing: 8, lockVisibleTimeRangeOnResize: true },
     watermark: { visible: false },
     attributionLogo: false,
     crosshair: { mode: 1 }
   })
+
+  const noPriceLine = { priceLineVisible: false, lastValueVisible: false }
 
   function destroy() {
     Object.values(charts.current).forEach(c => { try { c.remove() } catch {} })
@@ -68,7 +62,6 @@ export default function App() {
   function syncTimeScales(all) {
     const keys = Object.keys(all)
     const lock = { v: false }
-
     keys.forEach(k => {
       const ts = all[k].timeScale()
       ts.subscribeVisibleLogicalRangeChange((range) => {
@@ -119,43 +112,36 @@ export default function App() {
 
       charts.current = { mainChart, rsiChart, stochChart, macdChart }
 
-      const cs = mainChart.addCandlestickSeries()
+      const cs = mainChart.addCandlestickSeries({ ...noPriceLine })
       cs.setData(candles)
 
-      const bbU = mainChart.addLineSeries({ lineWidth: 1 })
-      const bbM = mainChart.addLineSeries({ lineWidth: 1 })
-      const bbL = mainChart.addLineSeries({ lineWidth: 1 })
+      const bbU = mainChart.addLineSeries({ lineWidth: 1, ...noPriceLine })
+      const bbM = mainChart.addLineSeries({ lineWidth: 1, ...noPriceLine })
+      const bbL = mainChart.addLineSeries({ lineWidth: 1, ...noPriceLine })
       safeSet(bbU, lineData(overlays, "bb_upper"))
       safeSet(bbM, lineData(overlays, "bb_middle"))
       safeSet(bbL, lineData(overlays, "bb_lower"))
 
-      const e20  = mainChart.addLineSeries({ lineWidth: 1 })
-      const e50  = mainChart.addLineSeries({ lineWidth: 1 })
-      const e100 = mainChart.addLineSeries({ lineWidth: 1 })
-      const e200 = mainChart.addLineSeries({ lineWidth: 1 })
+      const e20  = mainChart.addLineSeries({ lineWidth: 1, ...noPriceLine })
+      const e50  = mainChart.addLineSeries({ lineWidth: 1, ...noPriceLine })
+      const e100 = mainChart.addLineSeries({ lineWidth: 1, ...noPriceLine })
+      const e200 = mainChart.addLineSeries({ lineWidth: 1, ...noPriceLine })
       safeSet(e20,  lineData(overlays, "ema20"))
       safeSet(e50,  lineData(overlays, "ema50"))
       safeSet(e100, lineData(overlays, "ema100"))
       safeSet(e200, lineData(overlays, "ema200"))
 
-      const t0 = candles[0].time
-      const t1 = candles[candles.length - 1].time
-
-      const rsi = rsiChart.addLineSeries({ lineWidth: 2 })
+      const rsi = rsiChart.addLineSeries({ lineWidth: 2, ...noPriceLine })
       safeSet(rsi, lineData(overlays, "rsi14"))
-      safeSet(rsiChart.addLineSeries({ lineWidth: 1 }), [{ time: t0, value: 70 }, { time: t1, value: 70 }])
-      safeSet(rsiChart.addLineSeries({ lineWidth: 1 }), [{ time: t0, value: 30 }, { time: t1, value: 30 }])
 
-      const k = stochChart.addLineSeries({ lineWidth: 2 })
-      const dline = stochChart.addLineSeries({ lineWidth: 2 })
+      const k = stochChart.addLineSeries({ lineWidth: 2, ...noPriceLine })
+      const dline = stochChart.addLineSeries({ lineWidth: 2, ...noPriceLine })
       safeSet(k, lineData(overlays, "stoch_k"))
       safeSet(dline, lineData(overlays, "stoch_d"))
-      safeSet(stochChart.addLineSeries({ lineWidth: 1 }), [{ time: t0, value: 80 }, { time: t1, value: 80 }])
-      safeSet(stochChart.addLineSeries({ lineWidth: 1 }), [{ time: t0, value: 20 }, { time: t1, value: 20 }])
 
-      const hist = macdChart.addHistogramSeries()
-      const macd = macdChart.addLineSeries({ lineWidth: 2 })
-      const sig  = macdChart.addLineSeries({ lineWidth: 2 })
+      const hist = macdChart.addHistogramSeries({ ...noPriceLine })
+      const macd = macdChart.addLineSeries({ lineWidth: 2, ...noPriceLine })
+      const sig  = macdChart.addLineSeries({ lineWidth: 2, ...noPriceLine })
       safeSet(hist, histData(overlays, "macd_hist"))
       safeSet(macd, lineData(overlays, "macd"))
       safeSet(sig,  lineData(overlays, "macd_signal"))
