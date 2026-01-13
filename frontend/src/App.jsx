@@ -153,17 +153,20 @@ export default function App() {
       const t1 = candles[candles.length - 1].time
 
       const levels = Array.isArray(data.levels) ? data.levels : []
+      const SR_COLOR = "rgba(255,255,255,0.70)"
+      const fmt = (v) => Number(v).toFixed(2)
       for (const lvl of levels) {
-        if (!isNum(lvl.value)) continue
+        if (!lvl || !isNum(lvl.value)) continue
         const strength = Math.max(1, Number(lvl.strength || 1))
-        const width = Math.min(5, 1 + Math.floor(strength / 2))
-        const alpha = Math.min(0.55, 0.18 + strength * 0.05)
-        const color = lvl.type === "support"
-          ? `rgba(52, 199, 89, ${alpha})`
-          : `rgba(255, 59, 48, ${alpha})`
-
-        const s = mainChart.addLineSeries({ lineWidth: width, color, ...noPriceLine })
-        s.setData([{ time: t0, value: Number(lvl.value) }, { time: t1, value: Number(lvl.value) }])
+        const width = strength >= 6 ? 6 : strength >= 4 ? 5 : strength >= 3 ? 4 : 3
+        cs.createPriceLine({
+          price: Number(lvl.value),
+          color: SR_COLOR,
+          lineWidth: width,
+          lineStyle: 0,
+          axisLabelVisible: true,
+          title: fmt(lvl.value)
+        })
       }
 
       const rsi = rsiChart.addLineSeries({ lineWidth: 2, color: "#c084fc", ...noPriceLine })
