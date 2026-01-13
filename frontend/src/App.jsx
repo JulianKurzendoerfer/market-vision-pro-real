@@ -173,7 +173,7 @@ export default function App() {
       cs.createPriceLine({
         price: Number(lastClose),
         color: "rgba(52,199,89,0.95)",
-        lineWidth: 2,
+        lineWidth: 0,
         lineStyle: 0,
         axisLabelVisible: true,
         title: ""
