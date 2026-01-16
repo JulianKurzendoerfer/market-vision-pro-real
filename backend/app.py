@@ -104,10 +104,48 @@ def _rsi(values, period=14):
 def _macd(values, fast=12, slow=26, signal=9):
     ema_fast = _ema(values, fast)
     ema_slow = _ema(values, slow)
-    macd_line = [a - b for a, b in zip(ema_fast, ema_slow)]
-    signal_line = _ema(macd_line, signal)
-    hist = [m - s for m, s in zip(macd_line, signal_line)]
-    return macd_line, signal_line, hist
+    n = len(values)
+
+    macd = [None] * n
+    for i in range(n):
+        if ema_fast[i] is None or ema_slow[i] is None:
+            continue
+        macd[i] = ema_fast[i] - ema_slow[i]
+
+    signal_line = [None] * n
+    first = None
+    for i in range(n):
+        if macd[i] is not None:
+            first = i
+            break
+
+    if first is not None:
+        start = first + signal - 1
+        if start < n:
+            ok = True
+            s0 = 0.0
+            for i in range(first, start + 1):
+                if macd[i] is None:
+                    ok = False
+                    break
+                s0 += macd[i]
+            if ok:
+                ema = s0 / signal
+                signal_line[start] = ema
+                alpha = 2.0 / (signal + 1.0)
+                for i in range(start + 1, n):
+                    if macd[i] is None:
+                        continue
+                    ema = alpha * macd[i] + (1.0 - alpha) * ema
+                    signal_line[i] = ema
+
+    hist = [None] * n
+    for i in range(n):
+        if macd[i] is None or signal_line[i] is None:
+            continue
+        hist[i] = macd[i] - signal_line[i]
+
+    return hist
 
 def _stoch(highs, lows, closes, period=14, smooth_d=3):
     k = [None] * len(closes)
