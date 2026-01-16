@@ -195,12 +195,11 @@ export default function App() {
         .filter(x => isTime(x.time) && isNum(x.macd_hist))
         .map(x => {
           const v = Number(x.macd_hist)
-          return { time: x.time, value: v, color: v >= 0 ? "rgba(52,199,89,0.95)" : "rgba(255,59,48,0.95)" }
+          return { time: x.time, value: v, color: v >= 0 ? "rgba(38,166,154,0.9)" : "rgba(239,83,80,0.9)" }
         })
       try { hist.setData(macdBars) } catch {}
-
-
-      mainChart.timeScale().fitContent()
+      macdChart.addLineSeries({ lineWidth: 1, color: "rgba(255,255,255,0.35)", ...noPriceLine }).setData([{ time: t0, value: 0 }, { time: t1, value: 0 }])
+mainChart.timeScale().fitContent()
       const lr = { from: 0, to: Math.max(0, candles.length - 1) }
       mainChart.timeScale().setVisibleLogicalRange(lr)
       rsiChart.timeScale().setVisibleLogicalRange(lr)
