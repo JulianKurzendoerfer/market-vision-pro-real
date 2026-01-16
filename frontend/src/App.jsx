@@ -191,12 +191,14 @@ export default function App() {
       stochChart.addLineSeries({ lineWidth: 1, color: "#34c759", ...noPriceLine }).setData([{ time: t0, value: 20 }, { time: t1, value: 20 }])
 
       const hist = macdChart.addHistogramSeries({ ...noPriceLine })
-      const macd = macdChart.addLineSeries({ lineWidth: 2, color: "#38bdf8", ...noPriceLine })
-      const sig  = macdChart.addLineSeries({ lineWidth: 2, color: "#fb7185", ...noPriceLine })
-      safeSet(hist, histData(overlays, "macd_hist"))
-      safeSet(macd, lineData(overlays, "macd"))
-      safeSet(sig,  lineData(overlays, "macd_signal"))
-      macdChart.addLineSeries({ lineWidth: 1, color: "rgba(255,255,255,0.55)", ...noPriceLine }).setData([{ time: t0, value: 0 }, { time: t1, value: 0 }])
+      const macdBars = (overlays || [])
+        .filter(x => isTime(x.time) && isNum(x.macd_hist))
+        .map(x => {
+          const v = Number(x.macd_hist)
+          return { time: x.time, value: v, color: v >= 0 ? "rgba(52,199,89,0.95)" : "rgba(255,59,48,0.95)" }
+        })
+      try { hist.setData(macdBars) } catch {}
+
 
       mainChart.timeScale().fitContent()
       const lr = { from: 0, to: Math.max(0, candles.length - 1) }
