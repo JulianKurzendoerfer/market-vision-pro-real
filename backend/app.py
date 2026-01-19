@@ -2,7 +2,9 @@ import os
 from datetime import date, timedelta
 import math
 import requests
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI
+from fastapi import Request
+from fastapi.responses import JSONResponse, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 EODHD_BASE = "https://eodhd.com/api"
