@@ -36,6 +36,73 @@ const removeTVAttribution = (el) => {
   })
 }
 
+
+const ellLineData = (candles, deviation=0.06, minBars=8) => {
+  if (!candles || candles.length < (minBars + 10)) return []
+  const pct = (a,b) => b === 0 ? 0 : (a-b)/b
+  const pivots = []
+  let last = candles[0].close
+  let trend = 0
+  let exI = 0
+  let exP = last
+
+  for (let i=1;i<candles.length;i++){
+    const hi = candles[i].high
+    const lo = candles[i].low
+    if (trend === 0){
+      if (pct(hi,last) >= deviation){ trend = 1; exI=i; exP=hi }
+      else if (pct(last,lo) >= deviation){ trend = -1; exI=i; exP=lo }
+      continue
+    }
+    if (trend === 1){
+      if (hi > exP){ exP = hi; exI = i }
+      if (pct(exP, lo) >= deviation && (i-exI) >= minBars){
+        pivots.push({ time: candles[exI].time, value: exP, t: "H" })
+        trend = -1
+        last = exP
+        exI = i
+        exP = lo
+      }
+    } else {
+      if (lo < exP){ exP = lo; exI = i }
+      if (pct(hi, exP) >= deviation && (i-exI) >= minBars){
+        pivots.push({ time: candles[exI].time, value: exP, t: "L" })
+        trend = 1
+        last = exP
+        exI = i
+        exP = hi
+      }
+    }
+  }
+  pivots.push({ time: candles[exI].time, value: exP, t: trend===1 ? "H":"L" })
+  const cleaned = []
+  for (const pv of pivots){
+    if (!cleaned.length){ cleaned.push(pv); continue }
+    const prev = cleaned[cleaned.length-1]
+    if (pv.t === prev.t){
+      if (pv.t === "H"){
+        if (pv.value >= prev.value) cleaned[cleaned.length-1]=pv
+      } else {
+        if (pv.value <= prev.value) cleaned[cleaned.length-1]=pv
+      }
+    } else cleaned.push(pv)
+  }
+  return cleaned.map(x=>({time:x.time,value:x.value}))
+}
+
+const ellMarkers = (pivots) => {
+  if (!pivots || pivots.length < 5) return []
+  const last = pivots.slice(-5)
+  const labels = ["1","2","3","4","5"]
+  return last.map((p,i)=>({
+    time: p.time,
+    position: "aboveBar",
+    color: "rgba(255,255,255,0.85)",
+    shape: "circle",
+    text: labels[i]
+  }))
+}
+
 export default function App() {
   const [symbol, setSymbol] = useState("AAPL.US")
   const [loading, setLoading] = useState(false)
@@ -47,9 +114,10 @@ export default function App() {
   const rsiRef = useRef(null)
   const stochRef = useRef(null)
   const macdRef = useRef(null)
+  const elliottRef = useRef(null)
   const charts = useRef({})
 
-  const heights = useMemo(() => ({ main: 420, rsi: 140, stoch: 170, macd: 170 }), [])
+  const heights = useMemo(() => ({ main: 420, rsi: 140, stoch: 170, macd: 170, elliott: 360 }), [])
 
   const baseOpts = (w, h, timeVisible) => ({
     width: w,
@@ -124,10 +192,19 @@ export default function App() {
       const rsiChart   = createChart(rsiRef.current,   baseOpts(w, heights.rsi, false))
       const stochChart = createChart(stochRef.current, baseOpts(w, heights.stoch, false))
       const macdChart  = createChart(macdRef.current,  baseOpts(w, heights.macd, false))
+      const elliottChart = createChart(elliottRef.current, baseOpts(w, heights.elliott, true))
 
       charts.current = { mainChart, rsiChart, stochChart, macdChart }
 
       const cs = mainChart.addCandlestickSeries({ priceLineVisible: false, lastValueVisible: false })
+
+      const cs2 = elliottChart.addCandlestickSeries({ priceLineVisible: false, lastValueVisible: false })
+      cs2.setData(candles)
+      const zz2 = elliottChart.addLineSeries({ lineWidth: 2, color: "rgba(255,215,0,0.85)", priceLineVisible: false, lastValueVisible: false })
+      const piv2 = ellLineData(candles)
+      try { zz2.setData(piv2) } catch {}
+      try { cs2.setMarkers(ellMarkers(piv2)) } catch {}
+
       cs.setData(candles)
 
       const bbColor = "#22d3ee"
@@ -346,6 +423,7 @@ removeTVAttribution(mainRef.current)
             <div ref={rsiRef} />
             <div ref={stochRef} />
             <div ref={macdRef} />
+            <div ref={elliottRef} />
           </div>
         </div>
       </div>
