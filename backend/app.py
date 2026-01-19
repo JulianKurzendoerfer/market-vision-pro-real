@@ -227,6 +227,127 @@ app.add_middleware(
 def health():
     return {"status": "ok"}
 
+def _zigzag_pivots(candles, deviation=0.06, min_bars=8):
+    if not candles or len(candles) < (min_bars + 5):
+        return []
+    pivots = []
+    last_idx = 0
+    last_price = candles[0]["close"]
+    trend = 0
+    extreme_idx = 0
+    extreme_price = last_price
+
+    def pct(a, b):
+        if b == 0:
+            return 0.0
+        return (a - b) / b
+
+    for i in range(1, len(candles)):
+        hi = candles[i]["high"]
+        lo = candles[i]["low"]
+
+        if trend == 0:
+            up = pct(hi, last_price)
+            dn = pct(last_price, lo)
+            if up >= deviation:
+                trend = 1
+                extreme_idx = i
+                extreme_price = hi
+            elif dn >= deviation:
+                trend = -1
+                extreme_idx = i
+                extreme_price = lo
+            continue
+
+        if trend == 1:
+            if hi > extreme_price:
+                extreme_price = hi
+                extreme_idx = i
+            rev = pct(extreme_price, lo)
+            if rev >= deviation and (i - extreme_idx) >= min_bars:
+                pivots.append({"idx": extreme_idx, "time": candles[extreme_idx]["time"], "price": float(extreme_price), "type": "H"})
+                trend = -1
+                last_idx = extreme_idx
+                last_price = extreme_price
+                extreme_idx = i
+                extreme_price = lo
+
+        else:
+            if lo < extreme_price:
+                extreme_price = lo
+                extreme_idx = i
+            rev = pct(hi, extreme_price)
+            if rev >= deviation and (i - extreme_idx) >= min_bars:
+                pivots.append({"idx": extreme_idx, "time": candles[extreme_idx]["time"], "price": float(extreme_price), "type": "L"})
+                trend = 1
+                last_idx = extreme_idx
+                last_price = extreme_price
+                extreme_idx = i
+                extreme_price = hi
+
+    if trend == 1:
+        pivots.append({"idx": extreme_idx, "time": candles[extreme_idx]["time"], "price": float(extreme_price), "type": "H"})
+    elif trend == -1:
+        pivots.append({"idx": extreme_idx, "time": candles[extreme_idx]["time"], "price": float(extreme_price), "type": "L"})
+
+    pivots = sorted(pivots, key=lambda x: x["idx"])
+    cleaned = []
+    for pv in pivots:
+        if not cleaned:
+            cleaned.append(pv)
+            continue
+        if pv["type"] == cleaned[-1]["type"]:
+            if pv["type"] == "H":
+                if pv["price"] >= cleaned[-1]["price"]:
+                    cleaned[-1] = pv
+            else:
+                if pv["price"] <= cleaned[-1]["price"]:
+                    cleaned[-1] = pv
+        else:
+            cleaned.append(pv)
+    return cleaned
+
+def _elliott_labels(pivots):
+    if len(pivots) < 6:
+        return []
+    pv = pivots[-9:] if len(pivots) > 9 else pivots[:]
+    labels = []
+    def sign(a, b):
+        return 1 if b > a else (-1 if b < a else 0)
+
+    d = []
+    for i in range(1, len(pv)):
+        d.append(sign(pv[i-1]["price"], pv[i]["price"]))
+
+    best = None
+    for end in range(len(pv)-1, 4, -1):
+        seq = pv[end-4:end+1]
+        ds = [sign(seq[i]["price"], seq[i+1]["price"]) for i in range(4)]
+        if ds[0] == 0:
+            continue
+        ok = True
+        for j in range(1, 4):
+            if ds[j] != -ds[j-1] or ds[j] == 0:
+                ok = False
+                break
+        if not ok:
+            continue
+        best = seq
+        break
+
+    if best is None:
+        best = pv[-5:]
+
+    for i, name in enumerate(["1","2","3","4","5"]):
+        labels.append({"time": best[i]["time"], "price": best[i]["price"], "text": name})
+
+    tail = pivots[pivots.index(best[-1])+1:] if best[-1] in pivots else []
+    if len(tail) >= 3:
+        abc = tail[:3]
+        for i, name in enumerate(["A","B","C"]):
+            labels.append({"time": abc[i]["time"], "price": abc[i]["price"], "text": name})
+    return labels
+
 @app.get("/api/tv")
 def tv(
     symbol: str = Query(..., min_length=1, max_length=32),
@@ -298,4 +419,6 @@ def tv(
         })
     last = overlays[-1]
     levels = _sr_levels(candles)
-    return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels}
+    pivots = _zigzag_pivots(candles)
+    elliott = {"pivots": pivots, "labels": _elliott_labels(pivots)}
+    return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels, "elliott": elliott}
