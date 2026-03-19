@@ -294,46 +294,174 @@ def _zigzag_pivots(candles, deviation=0.06, min_bars=8):
             cleaned.append(pv)
     return cleaned
 
-def _elliott_labels(pivots):
-    if len(pivots) < 6:
-        return []
-    pv = pivots[-9:] if len(pivots) > 9 else pivots[:]
-    labels = []
-    def sign(a, b):
-        return 1 if b > a else (-1 if b < a else 0)
+def _wave_len(a, b):
+    return abs(float(b["price"]) - float(a["price"]))
 
-    d = []
-    for i in range(1, len(pv)):
-        d.append(sign(pv[i-1]["price"], pv[i]["price"]))
+def _between(v, lo, hi):
+    return lo <= v <= hi
+
+def _impulse_direction(seq):
+    if len(seq) != 5:
+        return 0
+    d1 = seq[1]["price"] - seq[0]["price"]
+    d2 = seq[2]["price"] - seq[1]["price"]
+    d3 = seq[3]["price"] - seq[2]["price"]
+    d4 = seq[4]["price"] - seq[3]["price"]
+    if d1 > 0 and d2 < 0 and d3 > 0 and d4 < 0:
+        return 1
+    if d1 < 0 and d2 > 0 and d3 < 0 and d4 > 0:
+        return -1
+    return 0
+
+def _score_impulse(seq):
+    if len(seq) != 5:
+        return None
+
+    direction = _impulse_direction(seq)
+    if direction == 0:
+        return None
+
+    p1, p2, p3, p4, p5 = seq
+
+    w1 = _wave_len(p1, p2)
+    w2 = _wave_len(p2, p3)
+    w3 = _wave_len(p3, p4)
+    w4 = _wave_len(p4, p5)
+
+    if min(w1, w2, w3, w4) <= 0:
+        return None
+
+    score = 0.0
+    rules = []
+
+    if direction == 1:
+        if p3["price"] <= p1["price"]:
+            return None
+        rules.append("wave2_valid")
+        score += 2.0
+
+        if p5["price"] <= p2["price"]:
+            return None
+        rules.append("wave4_valid")
+        score += 2.0
+
+        top1 = max(p1["price"], p2["price"])
+        bot1 = min(p1["price"], p2["price"])
+        if p5["price"] <= top1 and p5["price"] >= bot1:
+            return None
+        rules.append("no_overlap")
+        score += 2.0
+
+    else:
+        if p3["price"] >= p1["price"]:
+            return None
+        rules.append("wave2_valid")
+        score += 2.0
+
+        if p5["price"] >= p2["price"]:
+            return None
+        rules.append("wave4_valid")
+        score += 2.0
+
+        top1 = max(p1["price"], p2["price"])
+        bot1 = min(p1["price"], p2["price"])
+        if p5["price"] <= top1 and p5["price"] >= bot1:
+            return None
+        rules.append("no_overlap")
+        score += 2.0
+
+    motive1 = w1
+    motive3 = w3
+    motive5 = _wave_len(p4, p5)
+
+    shortest = min(motive1, motive3, motive5)
+    if motive3 == shortest:
+        return None
+    rules.append("wave3_not_shortest")
+    score += 3.0
+
+    r2 = w2 / w1 if w1 else 999
+    if _between(r2, 0.382, 0.786):
+        score += 2.0
+        rules.append("wave2_fib")
+    elif _between(r2, 0.236, 0.886):
+        score += 1.0
+
+    r3 = w3 / w1 if w1 else 999
+    if _between(r3, 1.382, 2.000):
+        score += 3.0
+        rules.append("wave3_fib")
+    elif _between(r3, 1.0, 2.618):
+        score += 1.5
+
+    r4 = w4 / w3 if w3 else 999
+    if _between(r4, 0.236, 0.5):
+        score += 2.0
+        rules.append("wave4_fib")
+    elif _between(r4, 0.146, 0.618):
+        score += 1.0
+
+    r5 = motive5 / w1 if w1 else 999
+    if _between(r5, 0.5, 1.2):
+        score += 1.5
+        rules.append("wave5_fib")
+
+    if motive3 > motive1:
+        score += 1.0
+    if motive3 > motive5:
+        score += 1.0
+
+    return {
+        "score": round(score, 3),
+        "direction": "bullish" if direction == 1 else "bearish",
+        "rules": rules,
+        "points": seq,
+    }
+
+def _best_impulse(pivots):
+    if len(pivots) < 5:
+        return None
 
     best = None
-    for end in range(len(pv)-1, 4, -1):
-        seq = pv[end-4:end+1]
-        ds = [sign(seq[i]["price"], seq[i+1]["price"]) for i in range(4)]
-        if ds[0] == 0:
+    n = len(pivots)
+
+    for i in range(0, n - 4):
+        seq = pivots[i:i+5]
+        scored = _score_impulse(seq)
+        if scored is None:
             continue
-        ok = True
-        for j in range(1, 4):
-            if ds[j] != -ds[j-1] or ds[j] == 0:
-                ok = False
-                break
-        if not ok:
-            continue
-        best = seq
-        break
+        if best is None or scored["score"] > best["score"]:
+            best = scored
 
-    if best is None:
-        best = pv[-5:]
+    return best
 
-    for i, name in enumerate(["1","2","3","4","5"]):
-        labels.append({"time": best[i]["time"], "price": best[i]["price"], "text": name})
+def _elliott_labels(pivots):
+    best = _best_impulse(pivots)
+    if not best:
+        return {
+            "pivots": pivots,
+            "labels": [],
+            "score": None,
+            "direction": None,
+            "rule_flags": [],
+        }
 
-    tail = pivots[pivots.index(best[-1])+1:] if best[-1] in pivots else []
-    if len(tail) >= 3:
-        abc = tail[:3]
-        for i, name in enumerate(["A","B","C"]):
-            labels.append({"time": abc[i]["time"], "price": abc[i]["price"], "text": name})
-    return labels
+    labels = []
+    for i, name in enumerate(["1", "2", "3", "4", "5"]):
+        pt = best["points"][i]
+        labels.append({
+            "time": pt["time"],
+            "price": pt["price"],
+            "text": name
+        })
+
+    return {
+        "pivots": pivots,
+        "labels": labels,
+        "score": best["score"],
+        "direction": best["direction"],
+        "rule_flags": best["rules"],
+    }
 
 @app.get("/api/tv")
 def tv(
