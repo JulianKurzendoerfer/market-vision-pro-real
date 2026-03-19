@@ -357,70 +357,75 @@ def tv(
     full: int = Query(1, ge=0, le=1),
     days: int = Query(520, ge=120, le=80000),
 ):
-    to_d = date.today()
-    if int(full) == 1:
-        start = _ipo_date(symbol)
-        raw = _get(f"eod/{symbol}", {"from": start.isoformat(), "to": to_d.isoformat(), "period": period})
-    else:
-        from_d = to_d - timedelta(days=days)
-        raw = _get(f"eod/{symbol}", {"from": from_d.isoformat(), "to": to_d.isoformat(), "period": period})
-    if not isinstance(raw, list) or len(raw) == 0:
-        raise HTTPException(status_code=502, detail="No candle data returned")
-    raw_sorted = sorted(raw, key=lambda x: x.get("date", ""))
-    candles = []
-    closes, highs, lows = [], [], []
-    for r in raw_sorted:
-        d = r.get("date")
-        o = r.get("open")
-        h = r.get("high")
-        l = r.get("low")
-        c = r.get("close")
-        if d is None or h is None or l is None or c is None:
-            continue
-        try:
-            c = float(c)
-            h = float(h)
-            l = float(l)
-            o = float(o) if o is not None else c
-        except Exception as e:
-            return {"ERROR": str(e), "raw": {"c": c, "h": h, "l": l, "o": o}}
-        if c <= 0 or h <= 0 or l <= 0 or h < l:
-            continue
-        candles.append({"time": d, "open": o, "high": h, "low": l, "close": c})
-        closes.append(c)
-        highs.append(h)
-        lows.append(l)
-    if len(candles) < 120:
-        raise HTTPException(status_code=502, detail="Not enough candle data")
-    bb_u, bb_m, bb_l = _bb(closes, 20, 2.0)
-    ema20 = _ema(closes, 20)
-    ema50 = _ema(closes, 50)
-    ema100 = _ema(closes, 100)
-    ema200 = _ema(closes, 200)
-    rsi14 = _rsi(closes, 14)
-    stoch_k, stoch_d = _stoch(highs, lows, closes, 14, 3)
-    macd, macd_sig, macd_hist = _macd(closes, 12, 26, 9)
-    overlays = []
-    for i in range(len(candles)):
-        overlays.append({
-            "time": candles[i]["time"],
-            "close": closes[i],
-            "bb_upper": bb_u[i],
-            "bb_middle": bb_m[i],
-            "bb_lower": bb_l[i],
-            "ema20": ema20[i] if i < len(ema20) else None,
-            "ema50": ema50[i] if i < len(ema50) else None,
-            "ema100": ema100[i] if i < len(ema100) else None,
-            "ema200": ema200[i] if i < len(ema200) else None,
-            "rsi14": rsi14[i] if i < len(rsi14) else None,
-            "stoch_k": stoch_k[i],
-            "stoch_d": stoch_d[i],
-            "macd": macd[i] if i < len(macd) else None,
-            "macd_signal": macd_sig[i] if i < len(macd_sig) else None,
-            "macd_hist": macd_hist[i] if i < len(macd_hist) else None,
-        })
-    last = overlays[-1]
-    levels = _sr_levels(candles)
-    pivots = _zigzag_pivots(candles)
-    elliott = {"pivots": pivots, "labels": _elliott_labels(pivots)}
-    return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels, "elliott": elliott}
+    try:
+
+            to_d = date.today()
+            if int(full) == 1:
+                start = _ipo_date(symbol)
+                raw = _get(f"eod/{symbol}", {"from": start.isoformat(), "to": to_d.isoformat(), "period": period})
+            else:
+                from_d = to_d - timedelta(days=days)
+                raw = _get(f"eod/{symbol}", {"from": from_d.isoformat(), "to": to_d.isoformat(), "period": period})
+            if not isinstance(raw, list) or len(raw) == 0:
+                raise HTTPException(status_code=502, detail="No candle data returned")
+            raw_sorted = sorted(raw, key=lambda x: x.get("date", ""))
+            candles = []
+            closes, highs, lows = [], [], []
+            for r in raw_sorted:
+                d = r.get("date")
+                o = r.get("open")
+                h = r.get("high")
+                l = r.get("low")
+                c = r.get("close")
+                if d is None or h is None or l is None or c is None:
+                    continue
+                try:
+                    c = float(c)
+                    h = float(h)
+                    l = float(l)
+                    o = float(o) if o is not None else c
+                except Exception as e:
+                    return {"ERROR": str(e), "raw": {"c": c, "h": h, "l": l, "o": o}}
+                if c <= 0 or h <= 0 or l <= 0 or h < l:
+                    continue
+                candles.append({"time": d, "open": o, "high": h, "low": l, "close": c})
+                closes.append(c)
+                highs.append(h)
+                lows.append(l)
+            if len(candles) < 120:
+                raise HTTPException(status_code=502, detail="Not enough candle data")
+            bb_u, bb_m, bb_l = _bb(closes, 20, 2.0)
+            ema20 = _ema(closes, 20)
+            ema50 = _ema(closes, 50)
+            ema100 = _ema(closes, 100)
+            ema200 = _ema(closes, 200)
+            rsi14 = _rsi(closes, 14)
+            stoch_k, stoch_d = _stoch(highs, lows, closes, 14, 3)
+            macd, macd_sig, macd_hist = _macd(closes, 12, 26, 9)
+            overlays = []
+            for i in range(len(candles)):
+                overlays.append({
+                    "time": candles[i]["time"],
+                    "close": closes[i],
+                    "bb_upper": bb_u[i],
+                    "bb_middle": bb_m[i],
+                    "bb_lower": bb_l[i],
+                    "ema20": ema20[i] if i < len(ema20) else None,
+                    "ema50": ema50[i] if i < len(ema50) else None,
+                    "ema100": ema100[i] if i < len(ema100) else None,
+                    "ema200": ema200[i] if i < len(ema200) else None,
+                    "rsi14": rsi14[i] if i < len(rsi14) else None,
+                    "stoch_k": stoch_k[i],
+                    "stoch_d": stoch_d[i],
+                    "macd": macd[i] if i < len(macd) else None,
+                    "macd_signal": macd_sig[i] if i < len(macd_sig) else None,
+                    "macd_hist": macd_hist[i] if i < len(macd_hist) else None,
+                })
+            last = overlays[-1]
+            levels = _sr_levels(candles)
+            pivots = _zigzag_pivots(candles)
+            elliott = {"pivots": pivots, "labels": _elliott_labels(pivots)}
+            return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels, "elliott": elliott}
+    except Exception as e:
+        import traceback
+        return {"ERROR": str(e), "TRACE": traceback.format_exc()}
