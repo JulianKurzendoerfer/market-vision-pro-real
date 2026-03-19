@@ -2,8 +2,7 @@ import os
 from datetime import date, timedelta
 import math
 import requests
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi import Request
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -108,46 +107,32 @@ def _macd(values, fast=12, slow=26, signal=9):
     ema_slow = _ema(values, slow)
     n = len(values)
 
-    macd = [None] * n
+    macd_line = [None] * n
     for i in range(n):
+        if i >= len(ema_fast) or i >= len(ema_slow):
+            continue
         if ema_fast[i] is None or ema_slow[i] is None:
             continue
-        macd[i] = ema_fast[i] - ema_slow[i]
+        macd_line[i] = ema_fast[i] - ema_slow[i]
 
     signal_line = [None] * n
-    first = None
-    for i in range(n):
-        if macd[i] is not None:
-            first = i
-            break
+    macd_vals = [x for x in macd_line if x is not None]
 
-    if first is not None:
-        start = first + signal - 1
-        if start < n:
-            ok = True
-            s0 = 0.0
-            for i in range(first, start + 1):
-                if macd[i] is None:
-                    ok = False
-                    break
-                s0 += macd[i]
-            if ok:
-                ema = s0 / signal
-                signal_line[start] = ema
-                alpha = 2.0 / (signal + 1.0)
-                for i in range(start + 1, n):
-                    if macd[i] is None:
-                        continue
-                    ema = alpha * macd[i] + (1.0 - alpha) * ema
-                    signal_line[i] = ema
+    if len(macd_vals) >= signal:
+        signal_vals = _ema(macd_vals, signal)
+        j = 0
+        for i in range(n):
+            if macd_line[i] is not None:
+                signal_line[i] = signal_vals[j]
+                j += 1
 
     hist = [None] * n
     for i in range(n):
-        if macd[i] is None or signal_line[i] is None:
+        if macd_line[i] is None or signal_line[i] is None:
             continue
-        hist[i] = macd[i] - signal_line[i]
+        hist[i] = macd_line[i] - signal_line[i]
 
-    return hist
+    return macd_line, signal_line, hist
 
 def _stoch(highs, lows, closes, period=14, smooth_d=3):
     k = [None] * len(closes)
