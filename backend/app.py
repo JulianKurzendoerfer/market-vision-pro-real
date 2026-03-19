@@ -382,8 +382,8 @@ def tv(
             h = float(h)
             l = float(l)
             o = float(o) if o is not None else c
-        except Exception:
-            continue
+        except Exception as e:
+            return {"ERROR": str(e), "raw": {"c": c, "h": h, "l": l, "o": o}}
         if c <= 0 or h <= 0 or l <= 0 or h < l:
             continue
         candles.append({"time": d, "open": o, "high": h, "low": l, "close": c})
