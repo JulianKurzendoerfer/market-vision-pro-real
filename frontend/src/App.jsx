@@ -194,16 +194,22 @@ export default function App() {
       const macdChart  = createChart(macdRef.current,  baseOpts(w, heights.macd, false))
       const elliottChart = createChart(elliottRef.current, baseOpts(w, heights.elliott, true))
 
-      charts.current = { mainChart, rsiChart, stochChart, macdChart }
+      charts.current = { mainChart, rsiChart, stochChart, macdChart, elliottChart }
 
       const cs = mainChart.addCandlestickSeries({ priceLineVisible: false, lastValueVisible: false })
 
       const cs2 = elliottChart.addCandlestickSeries({ priceLineVisible: false, lastValueVisible: false })
       cs2.setData(candles)
       const zz2 = elliottChart.addLineSeries({ lineWidth: 2, color: "rgba(255,215,0,0.85)", priceLineVisible: false, lastValueVisible: false })
-      const piv2 = ellLineData(candles)
+      const elliott = data.elliott || {}
+      const piv2 = Array.isArray(elliott.pivots) && elliott.pivots.length
+        ? elliott.pivots.filter(x => isTime(x.time) && isNum(x.price)).map(x => ({ time: x.time, value: Number(x.price) }))
+        : ellLineData(candles)
+      const markers2 = Array.isArray(elliott.labels) && elliott.labels.length
+        ? elliott.labels.filter(x => isTime(x.time) && isNum(x.price)).map(x => ({ time: x.time, position: "aboveBar", color: "rgba(255,255,255,0.9)", shape: "circle", text: String(x.text || "") }))
+        : ellMarkers(piv2)
       try { zz2.setData(piv2) } catch {}
-      try { cs2.setMarkers(ellMarkers(piv2)) } catch {}
+      try { cs2.setMarkers(markers2) } catch {}
 
       cs.setData(candles)
 
@@ -282,11 +288,13 @@ mainChart.timeScale().fitContent()
       rsiChart.timeScale().setVisibleLogicalRange(lr)
       stochChart.timeScale().setVisibleLogicalRange(lr)
       macdChart.timeScale().setVisibleLogicalRange(lr)
+      elliottChart.timeScale().setVisibleLogicalRange(lr)
       syncTimeScales(charts.current)
-removeTVAttribution(mainRef.current)
+      removeTVAttribution(mainRef.current)
       removeTVAttribution(rsiRef.current)
       removeTVAttribution(stochRef.current)
       removeTVAttribution(macdRef.current)
+      removeTVAttribution(elliottRef.current)
     } catch (e) {
       setErr(String(e?.message || e))
     } finally {
@@ -307,6 +315,7 @@ removeTVAttribution(mainRef.current)
       removeTVAttribution(rsiRef.current)
       removeTVAttribution(stochRef.current)
       removeTVAttribution(macdRef.current)
+      removeTVAttribution(elliottRef.current)
     }
     window.addEventListener("resize", onResize)
     return () => window.removeEventListener("resize", onResize)
