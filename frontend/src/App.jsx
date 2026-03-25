@@ -234,38 +234,44 @@ export default function App() {
       const levels = Array.isArray(data.levels) ? data.levels : []
       const lastClose = candles[candles.length - 1].close
       const priceSpan = Math.max(...candles.map(x => x.high)) - Math.min(...candles.map(x => x.low))
-      const nearThreshold = Math.max(lastClose * 0.05, priceSpan * 0.10)
+      const nearThreshold = Math.max(lastClose * 0.04, priceSpan * 0.08)
 
-      for (const lvl of levels) {
-        if (!lvl || !isNum(lvl.value)) continue
-        const value = Number(lvl.value)
-        const strength = Math.max(1, Number(lvl.strength || 1))
-        const dist = Math.abs(value - lastClose)
-        const isNear = dist <= nearThreshold
-        const isRelevant = value >= lastClose * 0.75 && value <= lastClose * 1.25
+      const visibleLevels = levels
+        .filter(lvl => lvl && isNum(lvl.value))
+        .map(lvl => ({
+          ...lvl,
+          value: Number(lvl.value),
+          strength: Math.max(1, Number(lvl.strength || 1)),
+          dist: Math.abs(Number(lvl.value) - lastClose)
+        }))
+        .filter(lvl => lvl.value >= lastClose * 0.82 && lvl.value <= lastClose * 1.18)
+        .sort((a, b) => a.dist - b.dist || b.strength - a.strength)
+        .slice(0, 8)
+        .sort((a, b) => a.value - b.value)
 
-        if (!isRelevant) continue
+      for (const lvl of visibleLevels) {
+        const isNear = lvl.dist <= nearThreshold
 
-        let color = "rgba(64, 130, 255, 0.28)"
+        let color = "rgba(64, 130, 255, 0.42)"
         let width = 1
         let showLabel = false
 
-        if (strength >= 6) {
-          color = isNear ? "rgba(46, 124, 255, 0.90)" : "rgba(46, 124, 255, 0.58)"
+        if (lvl.strength >= 6) {
+          color = isNear ? "rgba(46, 124, 255, 0.95)" : "rgba(46, 124, 255, 0.70)"
           width = isNear ? 3 : 2
           showLabel = true
-        } else if (strength >= 4) {
-          color = isNear ? "rgba(70, 144, 255, 0.76)" : "rgba(70, 144, 255, 0.44)"
+        } else if (lvl.strength >= 4) {
+          color = isNear ? "rgba(70, 144, 255, 0.84)" : "rgba(70, 144, 255, 0.58)"
           width = isNear ? 2 : 1
           showLabel = isNear
         } else {
-          color = isNear ? "rgba(110, 170, 255, 0.52)" : "rgba(64, 130, 255, 0.28)"
+          color = isNear ? "rgba(110, 170, 255, 0.68)" : "rgba(110, 170, 255, 0.40)"
           width = 1
           showLabel = isNear
         }
 
         cs.createPriceLine({
-          price: value,
+          price: lvl.value,
           color,
           lineWidth: width,
           lineStyle: 0,
