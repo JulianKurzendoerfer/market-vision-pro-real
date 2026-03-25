@@ -236,7 +236,7 @@ export default function App() {
       const priceSpan = Math.max(...candles.map(x => x.high)) - Math.min(...candles.map(x => x.low))
       const nearThreshold = Math.max(lastClose * 0.04, priceSpan * 0.08)
 
-      const visibleLevels = levels
+      const normalizedLevels = levels
         .filter(lvl => lvl && isNum(lvl.value))
         .map(lvl => ({
           ...lvl,
@@ -244,9 +244,17 @@ export default function App() {
           strength: Math.max(1, Number(lvl.strength || 1)),
           dist: Math.abs(Number(lvl.value) - lastClose)
         }))
-        .filter(lvl => lvl.value >= lastClose * 0.82 && lvl.value <= lastClose * 1.18)
         .sort((a, b) => a.dist - b.dist || b.strength - a.strength)
-        .slice(0, 8)
+
+      let visibleLevels = normalizedLevels
+        .filter(lvl => lvl.value >= lastClose * 0.85 && lvl.value <= lastClose * 1.15)
+        .slice(0, 10)
+
+      if (visibleLevels.length < 4) {
+        visibleLevels = normalizedLevels.slice(0, 8)
+      }
+
+      visibleLevels = [...visibleLevels]
         .sort((a, b) => a.value - b.value)
 
       for (const lvl of visibleLevels) {
@@ -257,15 +265,15 @@ export default function App() {
         let showLabel = false
 
         if (lvl.strength >= 6) {
-          color = isNear ? "rgba(46, 124, 255, 0.95)" : "rgba(46, 124, 255, 0.70)"
+          color = isNear ? "rgba(46, 124, 255, 0.95)" : "rgba(46, 124, 255, 0.72)"
           width = isNear ? 3 : 2
           showLabel = true
         } else if (lvl.strength >= 4) {
-          color = isNear ? "rgba(70, 144, 255, 0.84)" : "rgba(70, 144, 255, 0.58)"
+          color = isNear ? "rgba(70, 144, 255, 0.84)" : "rgba(70, 144, 255, 0.60)"
           width = isNear ? 2 : 1
           showLabel = isNear
         } else {
-          color = isNear ? "rgba(110, 170, 255, 0.68)" : "rgba(110, 170, 255, 0.40)"
+          color = isNear ? "rgba(110, 170, 255, 0.68)" : "rgba(110, 170, 255, 0.44)"
           width = 1
           showLabel = isNear
         }
