@@ -234,7 +234,7 @@ export default function App() {
       const levels = Array.isArray(data.levels) ? data.levels : []
       const lastClose = candles[candles.length - 1].close
       const priceSpan = Math.max(...candles.map(x => x.high)) - Math.min(...candles.map(x => x.low))
-      const nearThreshold = Math.max(lastClose * 0.03, priceSpan * 0.06)
+      const nearThreshold = Math.max(lastClose * 0.05, priceSpan * 0.10)
 
       for (const lvl of levels) {
         if (!lvl || !isNum(lvl.value)) continue
@@ -243,22 +243,22 @@ export default function App() {
         const dist = Math.abs(value - lastClose)
         const isNear = dist <= nearThreshold
 
-        let color = "rgba(64, 130, 255, 0.18)"
+        let color = "rgba(64, 130, 255, 0.28)"
         let width = 1
         let showLabel = false
 
         if (strength >= 6) {
-          color = isNear ? "rgba(46, 124, 255, 0.82)" : "rgba(46, 124, 255, 0.52)"
+          color = isNear ? "rgba(46, 124, 255, 0.90)" : "rgba(46, 124, 255, 0.58)"
           width = isNear ? 3 : 2
           showLabel = true
         } else if (strength >= 4) {
-          color = isNear ? "rgba(70, 144, 255, 0.66)" : "rgba(70, 144, 255, 0.34)"
+          color = isNear ? "rgba(70, 144, 255, 0.76)" : "rgba(70, 144, 255, 0.44)"
           width = isNear ? 2 : 1
           showLabel = isNear
-        } else if (isNear) {
-          color = "rgba(110, 170, 255, 0.44)"
+        } else {
+          color = isNear ? "rgba(110, 170, 255, 0.52)" : "rgba(64, 130, 255, 0.28)"
           width = 1
-          showLabel = true
+          showLabel = isNear
         }
 
         cs.createPriceLine({
