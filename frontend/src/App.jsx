@@ -242,6 +242,9 @@ export default function App() {
         const strength = Math.max(1, Number(lvl.strength || 1))
         const dist = Math.abs(value - lastClose)
         const isNear = dist <= nearThreshold
+        const isRelevant = value >= lastClose * 0.75 && value <= lastClose * 1.25
+
+        if (!isRelevant) continue
 
         let color = "rgba(64, 130, 255, 0.28)"
         let width = 1
