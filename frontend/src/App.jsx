@@ -232,27 +232,49 @@ export default function App() {
       safeSet(e200, lineData(overlays, "ema200"))
 
       const levels = Array.isArray(data.levels) ? data.levels : []
-      const SR_COLOR = "rgba(255,255,255,0.24)"
-      const fmt = (v) => Number(v).toFixed(2)
+      const lastClose = candles[candles.length - 1].close
+      const priceSpan = Math.max(...candles.map(x => x.high)) - Math.min(...candles.map(x => x.low))
+      const nearThreshold = Math.max(lastClose * 0.03, priceSpan * 0.06)
+
       for (const lvl of levels) {
         if (!lvl || !isNum(lvl.value)) continue
+        const value = Number(lvl.value)
         const strength = Math.max(1, Number(lvl.strength || 1))
-        const width = strength >= 6 ? 4 : strength >= 4 ? 3 : 2
+        const dist = Math.abs(value - lastClose)
+        const isNear = dist <= nearThreshold
+
+        let color = "rgba(64, 130, 255, 0.18)"
+        let width = 1
+        let showLabel = false
+
+        if (strength >= 6) {
+          color = isNear ? "rgba(46, 124, 255, 0.82)" : "rgba(46, 124, 255, 0.52)"
+          width = isNear ? 3 : 2
+          showLabel = true
+        } else if (strength >= 4) {
+          color = isNear ? "rgba(70, 144, 255, 0.66)" : "rgba(70, 144, 255, 0.34)"
+          width = isNear ? 2 : 1
+          showLabel = isNear
+        } else if (isNear) {
+          color = "rgba(110, 170, 255, 0.44)"
+          width = 1
+          showLabel = true
+        }
+
         cs.createPriceLine({
-          price: Number(lvl.value),
-          color: SR_COLOR,
+          price: value,
+          color,
           lineWidth: width,
           lineStyle: 0,
-          axisLabelVisible: true,
+          axisLabelVisible: showLabel,
           title: ""
         })
       }
 
-      const lastClose = candles[candles.length - 1].close
       cs.createPriceLine({
         price: Number(lastClose),
         color: "rgba(52,199,89,0.95)",
-        lineWidth: 0,
+        lineWidth: 1,
         lineStyle: 0,
         axisLabelVisible: true,
         title: ""
