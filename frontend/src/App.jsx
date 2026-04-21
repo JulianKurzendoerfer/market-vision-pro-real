@@ -233,49 +233,81 @@ export default function App() {
 
       const levels = Array.isArray(data.levels) ? data.levels : []
       const lastClose = candles[candles.length - 1].close
-      const priceSpan = Math.max(...candles.map(x => x.high)) - Math.min(...candles.map(x => x.low))
-      const nearThreshold = Math.max(lastClose * 0.04, priceSpan * 0.08)
+      const chartMin = Math.min(...candles.map(x => x.low))
+      const chartMax = Math.max(...candles.map(x => x.high))
+      const priceSpan = chartMax - chartMin
+      const chartPadding = Math.max(priceSpan * 0.08, lastClose * 0.03)
+      const rangeMin = chartMin - chartPadding
+      const rangeMax = chartMax + chartPadding
 
       const normalizedLevels = levels
         .filter(lvl => lvl && isNum(lvl.value))
-        .map(lvl => ({
-          ...lvl,
-          value: Number(lvl.value),
-          strength: Math.max(1, Number(lvl.strength || 1)),
-          dist: Math.abs(Number(lvl.value) - lastClose)
-        }))
-        .sort((a, b) => a.dist - b.dist || b.strength - a.strength)
+        .map(lvl => {
+          const value = Number(lvl.value)
+          const strength = Math.max(1, Number(lvl.strength || 1))
+          const dist = Math.abs(value - lastClose)
+          const side = value <= lastClose ? "support" : "resistance"
+          return { ...lvl, value, strength, dist, side }
+        })
+        .filter(lvl => lvl.value >= rangeMin && lvl.value <= rangeMax)
 
-      let visibleLevels = normalizedLevels
-        .filter(lvl => lvl.value >= lastClose * 0.85 && lvl.value <= lastClose * 1.15)
-        .slice(0, 10)
+      const below = normalizedLevels
+        .filter(lvl => lvl.value <= lastClose)
+        .sort((a, b) => b.strength - a.strength || a.dist - b.dist)
+        .slice(0, 4)
+
+      const above = normalizedLevels
+        .filter(lvl => lvl.value > lastClose)
+        .sort((a, b) => b.strength - a.strength || a.dist - b.dist)
+        .slice(0, 4)
+
+      let visibleLevels = [...below, ...above]
 
       if (visibleLevels.length < 4) {
-        visibleLevels = normalizedLevels.slice(0, 8)
+        visibleLevels = normalizedLevels
+          .sort((a, b) => a.dist - b.dist || b.strength - a.strength)
+          .slice(0, 8)
       }
 
-      visibleLevels = [...visibleLevels]
+      const seen = new Set()
+      visibleLevels = visibleLevels
+        .filter(lvl => {
+          const key = lvl.value.toFixed(4)
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
         .sort((a, b) => a.value - b.value)
 
-      for (const lvl of visibleLevels) {
-        const isNear = lvl.dist <= nearThreshold
+      const nearestSupport = visibleLevels
+        .filter(lvl => lvl.value <= lastClose)
+        .sort((a, b) => a.dist - b.dist)[0]
 
-        let color = "rgba(64, 130, 255, 0.42)"
+      const nearestResistance = visibleLevels
+        .filter(lvl => lvl.value > lastClose)
+        .sort((a, b) => a.dist - b.dist)[0]
+
+      for (const lvl of visibleLevels) {
+        const isNearest =
+          (nearestSupport && lvl.value === nearestSupport.value) ||
+          (nearestResistance && lvl.value === nearestResistance.value)
+
+        let color = "rgba(64,130,255,0.34)"
         let width = 1
         let showLabel = false
 
         if (lvl.strength >= 6) {
-          color = isNear ? "rgba(46, 124, 255, 0.95)" : "rgba(46, 124, 255, 0.72)"
-          width = isNear ? 3 : 2
+          color = isNearest ? "rgba(46,124,255,0.98)" : "rgba(46,124,255,0.72)"
+          width = isNearest ? 3 : 2
           showLabel = true
         } else if (lvl.strength >= 4) {
-          color = isNear ? "rgba(70, 144, 255, 0.84)" : "rgba(70, 144, 255, 0.60)"
-          width = isNear ? 2 : 1
-          showLabel = isNear
+          color = isNearest ? "rgba(70,144,255,0.90)" : "rgba(70,144,255,0.58)"
+          width = isNearest ? 2 : 1
+          showLabel = isNearest
         } else {
-          color = isNear ? "rgba(110, 170, 255, 0.68)" : "rgba(110, 170, 255, 0.44)"
-          width = 1
-          showLabel = isNear
+          color = isNearest ? "rgba(110,170,255,0.82)" : "rgba(110,170,255,0.34)"
+          width = isNearest ? 2 : 1
+          showLabel = isNearest
         }
 
         cs.createPriceLine({
