@@ -149,7 +149,7 @@ def _stoch(highs, lows, closes, period=14, smooth_d=3):
         d[i] = (sum(window) / len(window)) if window else None
     return k, d
 
-def _sr_levels(candles, pivot_left=6, pivot_right=6, tol_pct=0.003, max_levels=18):
+def _sr_levels(candles, pivot_left=6, pivot_right=6, tol_pct=0.012, max_levels=18, current_price=None, price_range_pct=0.50):
     if not candles or len(candles) < (pivot_left + pivot_right + 10):
         return []
     pivots = []
@@ -170,6 +170,12 @@ def _sr_levels(candles, pivot_left=6, pivot_right=6, tol_pct=0.003, max_levels=1
             pivots.append(("support", float(lo)))
         if is_high:
             pivots.append(("resistance", float(hi)))
+    if not pivots:
+        return []
+    if current_price and current_price > 0:
+        lo = current_price * (1.0 - price_range_pct)
+        hi = current_price * (1.0 + price_range_pct)
+        pivots = [(t, v) for t, v in pivots if lo <= v <= hi]
     if not pivots:
         return []
     supports = [p[1] for p in pivots if p[0] == "support"]
@@ -535,7 +541,7 @@ def tv(
                     "macd_hist": macd_hist[i] if i < len(macd_hist) else None,
                 })
             last = overlays[-1]
-            levels = _sr_levels(candles[-500:] if len(candles) > 500 else candles)
+            levels = _sr_levels(candles, current_price=closes[-1])
             pivots = _zigzag_pivots(candles)
             elliott = {"pivots": pivots, "labels": _elliott_labels(pivots)}
             return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels, "elliott": elliott}
