@@ -248,21 +248,26 @@ export default function App() {
         })
         .filter(lvl => lvl.value >= chartMin * 0.92 && lvl.value <= chartMax * 1.08)
 
+      const scoreLevel = (lvl) => {
+        const proximityScore = 1 / (1 + lvl.dist / (lastClose * 0.05))
+        return lvl.strength * 0.5 + proximityScore * 3
+      }
+
       const supports = normalizedLevels
         .filter(lvl => lvl.value <= lastClose)
-        .sort((a, b) => b.strength - a.strength || a.dist - b.dist)
+        .sort((a, b) => scoreLevel(b) - scoreLevel(a))
         .slice(0, 10)
 
       const resistances = normalizedLevels
         .filter(lvl => lvl.value > lastClose)
-        .sort((a, b) => b.strength - a.strength || a.dist - b.dist)
+        .sort((a, b) => scoreLevel(b) - scoreLevel(a))
         .slice(0, 10)
 
       let visibleLevels = [...supports, ...resistances]
 
       if (visibleLevels.length < 4) {
         visibleLevels = normalizedLevels
-          .sort((a, b) => b.strength - a.strength || a.dist - b.dist)
+          .sort((a, b) => scoreLevel(b) - scoreLevel(a))
           .slice(0, 14)
       }
 
