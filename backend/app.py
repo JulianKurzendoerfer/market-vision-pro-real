@@ -535,7 +535,7 @@ def tv(
                     "macd_hist": macd_hist[i] if i < len(macd_hist) else None,
                 })
             last = overlays[-1]
-            levels = _sr_levels(candles)
+            levels = _sr_levels(candles[-500:] if len(candles) > 500 else candles)
             pivots = _zigzag_pivots(candles)
             elliott = {"pivots": pivots, "labels": _elliott_labels(pivots)}
             return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels, "elliott": elliott}
