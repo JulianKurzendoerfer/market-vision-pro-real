@@ -236,9 +236,7 @@ export default function App() {
       const chartMin = Math.min(...candles.map(x => x.low))
       const chartMax = Math.max(...candles.map(x => x.high))
       const priceSpan = chartMax - chartMin
-      const chartPadding = Math.max(priceSpan * 0.08, lastClose * 0.03)
-      const rangeMin = chartMin - chartPadding
-      const rangeMax = chartMax + chartPadding
+      const nearThreshold = Math.max(lastClose * 0.04, priceSpan * 0.08)
 
       const normalizedLevels = levels
         .filter(lvl => lvl && isNum(lvl.value))
@@ -246,44 +244,43 @@ export default function App() {
           const value = Number(lvl.value)
           const strength = Math.max(1, Number(lvl.strength || 1))
           const dist = Math.abs(value - lastClose)
-          const side = value <= lastClose ? "support" : "resistance"
-          return { ...lvl, value, strength, dist, side }
+          return { ...lvl, value, strength, dist }
         })
-        .filter(lvl => lvl.value >= rangeMin && lvl.value <= rangeMax)
+        .filter(lvl => lvl.value >= chartMin * 0.92 && lvl.value <= chartMax * 1.08)
 
-      const below = normalizedLevels
+      const supports = normalizedLevels
         .filter(lvl => lvl.value <= lastClose)
-        .sort((a, b) => b.strength - a.strength || a.dist - b.dist)
-        .slice(0, 4)
+        .sort((a, b) => a.dist - b.dist || b.strength - a.strength)
+        .slice(0, 3)
 
-      const above = normalizedLevels
+      const resistances = normalizedLevels
         .filter(lvl => lvl.value > lastClose)
-        .sort((a, b) => b.strength - a.strength || a.dist - b.dist)
-        .slice(0, 4)
+        .sort((a, b) => a.dist - b.dist || b.strength - a.strength)
+        .slice(0, 3)
 
-      let visibleLevels = [...below, ...above]
+      let visibleLevels = [...supports, ...resistances]
 
       if (visibleLevels.length < 4) {
         visibleLevels = normalizedLevels
           .sort((a, b) => a.dist - b.dist || b.strength - a.strength)
-          .slice(0, 8)
+          .slice(0, 6)
       }
 
       const seen = new Set()
       visibleLevels = visibleLevels
         .filter(lvl => {
-          const key = lvl.value.toFixed(4)
+          const key = lvl.value.toFixed(3)
           if (seen.has(key)) return false
           seen.add(key)
           return true
         })
         .sort((a, b) => a.value - b.value)
 
-      const nearestSupport = visibleLevels
+      const nearestSupport = [...visibleLevels]
         .filter(lvl => lvl.value <= lastClose)
         .sort((a, b) => a.dist - b.dist)[0]
 
-      const nearestResistance = visibleLevels
+      const nearestResistance = [...visibleLevels]
         .filter(lvl => lvl.value > lastClose)
         .sort((a, b) => a.dist - b.dist)[0]
 
@@ -292,20 +289,20 @@ export default function App() {
           (nearestSupport && lvl.value === nearestSupport.value) ||
           (nearestResistance && lvl.value === nearestResistance.value)
 
-        let color = "rgba(64,130,255,0.34)"
+        let color = "rgba(64,130,255,0.62)"
         let width = 1
         let showLabel = false
 
         if (lvl.strength >= 6) {
-          color = isNearest ? "rgba(46,124,255,0.98)" : "rgba(46,124,255,0.72)"
+          color = isNearest ? "rgba(46,124,255,0.98)" : "rgba(46,124,255,0.86)"
           width = isNearest ? 3 : 2
           showLabel = true
         } else if (lvl.strength >= 4) {
-          color = isNearest ? "rgba(70,144,255,0.90)" : "rgba(70,144,255,0.58)"
+          color = isNearest ? "rgba(70,144,255,0.94)" : "rgba(70,144,255,0.78)"
           width = isNearest ? 2 : 1
           showLabel = isNearest
         } else {
-          color = isNearest ? "rgba(110,170,255,0.82)" : "rgba(110,170,255,0.34)"
+          color = isNearest ? "rgba(110,170,255,0.90)" : "rgba(110,170,255,0.68)"
           width = isNearest ? 2 : 1
           showLabel = isNearest
         }
