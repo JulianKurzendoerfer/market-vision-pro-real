@@ -149,7 +149,7 @@ def _stoch(highs, lows, closes, period=14, smooth_d=3):
         d[i] = (sum(window) / len(window)) if window else None
     return k, d
 
-def _sr_levels(candles, pivot_left=6, pivot_right=6, tol_pct=0.012, max_levels=18, current_price=None, price_range_pct=0.50):
+def _sr_levels(candles, pivot_left=6, pivot_right=6, tol_pct=0.008, max_levels=30, current_price=None, price_range_pct=0.50):
     if not candles or len(candles) < (pivot_left + pivot_right + 10):
         return []
     pivots = []

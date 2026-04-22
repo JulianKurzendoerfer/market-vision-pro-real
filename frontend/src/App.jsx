@@ -251,19 +251,19 @@ export default function App() {
       const supports = normalizedLevels
         .filter(lvl => lvl.value <= lastClose)
         .sort((a, b) => b.strength - a.strength || a.dist - b.dist)
-        .slice(0, 5)
+        .slice(0, 10)
 
       const resistances = normalizedLevels
         .filter(lvl => lvl.value > lastClose)
         .sort((a, b) => b.strength - a.strength || a.dist - b.dist)
-        .slice(0, 5)
+        .slice(0, 10)
 
       let visibleLevels = [...supports, ...resistances]
 
       if (visibleLevels.length < 4) {
         visibleLevels = normalizedLevels
           .sort((a, b) => b.strength - a.strength || a.dist - b.dist)
-          .slice(0, 8)
+          .slice(0, 14)
       }
 
       const seen = new Set()
