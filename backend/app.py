@@ -436,7 +436,11 @@ def _best_impulse(pivots):
         scored = _score_impulse(seq)
         if scored is None:
             continue
-        if best is None or scored["score"] > best["score"]:
+        if scored["score"] < 10.0:
+            continue
+        recency = i / max(n - 4, 1)
+        scored["adjusted"] = scored["score"] + recency * 5.0
+        if best is None or scored["adjusted"] > best["adjusted"]:
             best = scored
 
     return best
@@ -542,7 +546,8 @@ def tv(
                 })
             last = overlays[-1]
             levels = _sr_levels(candles, current_price=closes[-1])
-            pivots = _zigzag_pivots(candles)
+            ell_candles = candles[-300:] if len(candles) > 300 else candles
+            pivots = _zigzag_pivots(ell_candles, deviation=0.04, min_bars=5)
             elliott = {"pivots": pivots, "labels": _elliott_labels(pivots)}
             return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels, "elliott": elliott}
     except Exception as e:
