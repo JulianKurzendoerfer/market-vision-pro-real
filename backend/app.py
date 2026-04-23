@@ -521,17 +521,26 @@ def _build_main_scenario(best, current_wave, fib_targets, pivots):
     targets_up = [t for t in fib_targets if t["price"] > last_price]
     targets_down = [t for t in fib_targets if t["price"] < last_price]
     if current_wave in ("after_5", "corrective_after_5"):
-        zone = [targets_down[0]["price"], targets_down[1]["price"]] if len(targets_down) >= 2 else None
+        zone = [targets_down[0]["price"], targets_down[1]["price"]] if len(targets_down) >= 2 else [round(last_price*0.90,2), round(last_price*0.95,2)]
         desc = "Korrektur nach abgeschlossenem Impuls"
         prob = 60
         future = _project_correction(pts, direction)
     elif "wave_3" in current_wave or "wave_5" in current_wave:
-        zone = [targets_up[0]["price"], targets_up[1]["price"]] if len(targets_up) >= 2 else None
+        zone = [targets_up[0]["price"], targets_up[1]["price"]] if len(targets_up) >= 2 else [round(last_price*1.05,2), round(last_price*1.10,2)]
         desc = "Impuls setzt sich fort"
         prob = 65
         future = _project_continuation(pts, direction, fib_targets)
     else:
-        zone = [targets_up[0]["price"], targets_up[1]["price"]] if len(targets_up) >= 2 else None
+        t_up = [t for t in fib_targets if t["price"] > last_price]
+        t_dn = [t for t in fib_targets if t["price"] < last_price]
+        if direction == "bullish" and len(t_up) >= 2:
+            zone = [t_up[0]["price"], t_up[1]["price"]]
+        elif direction == "bearish" and len(t_dn) >= 2:
+            zone = [t_dn[0]["price"], t_dn[1]["price"]]
+        elif len(t_up) >= 2:
+            zone = [t_up[0]["price"], t_up[1]["price"]]
+        else:
+            zone = [round(last_price*1.05,2), round(last_price*1.12,2)]
         desc = "Impulsstruktur läuft weiter"
         prob = 58
         future = _project_continuation(pts, direction, fib_targets)
@@ -551,12 +560,12 @@ def _build_alt_scenario(best, current_wave, fib_targets, pivots):
     targets_down = [t for t in fib_targets if t["price"] < last_price]
     targets_up = [t for t in fib_targets if t["price"] > last_price]
     if current_wave in ("after_5", "corrective_after_5"):
-        zone = [targets_up[0]["price"], targets_up[1]["price"]] if len(targets_up) >= 2 else None
+        zone = [targets_up[0]["price"], targets_up[1]["price"]] if len(targets_up) >= 2 else [round(last_price*1.05,2), round(last_price*1.10,2)]
         desc = "Impuls setzt sich direkt fort (Welle 3 Extension)"
         prob = 40
         future = _project_continuation(pts, direction, fib_targets)
     else:
-        zone = [targets_down[0]["price"], targets_down[1]["price"]] if len(targets_down) >= 2 else None
+        zone = [targets_down[0]["price"], targets_down[1]["price"]] if len(targets_down) >= 2 else [round(last_price*0.88,2), round(last_price*0.93,2)]
         desc = "Impuls beendet, tiefere Korrektur"
         prob = 35
         future = _project_correction(pts, direction)
@@ -699,8 +708,8 @@ def tv(
                 })
             last = overlays[-1]
             levels = _sr_levels(candles, current_price=closes[-1])
-            ell_candles = candles[-300:] if len(candles) > 300 else candles
-            pivots = _zigzag_pivots(ell_candles, deviation=0.04, min_bars=5)
+            ell_candles = candles[-250:] if len(candles) > 250 else candles
+            pivots = _zigzag_pivots(ell_candles, deviation=0.06, min_bars=8)
             elliott = _elliott_labels(pivots)
             return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels, "elliott": elliott}
     except Exception as e:
