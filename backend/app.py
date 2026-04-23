@@ -316,34 +316,45 @@ def _fib_score(ratio, targets):
     return 0.0
 
 def _score_impulse(seq):
-    if len(seq) != 5:
+    if len(seq) != 6:
         return None
-    p0, p1, p2, p3, p4 = seq
-    d0 = p1["price"] - p0["price"]
-    d1 = p2["price"] - p1["price"]
-    d2 = p3["price"] - p2["price"]
-    d3 = p4["price"] - p3["price"]
-    if not (d0 > 0 and d1 < 0 and d2 > 0 and d3 < 0) and        not (d0 < 0 and d1 > 0 and d2 < 0 and d3 > 0):
+    p0, p1, p2, p3, p4, p5 = seq
+    types = [p.get("type","") for p in seq]
+    if types == ["L","H","L","H","L","H"]:
+        direction = 1
+    elif types == ["H","L","H","L","H","L"]:
+        direction = -1
+    else:
         return None
-    direction = 1 if d0 > 0 else -1
+    if direction == 1:
+        if p1["price"] <= p0["price"]: return None
+        if p2["price"] >= p1["price"]: return None
+        if p2["price"] <= p0["price"]: return None
+        if p3["price"] <= p2["price"]: return None
+        if p3["price"] <= p1["price"]: return None
+        if p4["price"] >= p3["price"]: return None
+        if p4["price"] <= p1["price"]: return None
+        if p5["price"] <= p4["price"]: return None
+    else:
+        if p1["price"] >= p0["price"]: return None
+        if p2["price"] <= p1["price"]: return None
+        if p2["price"] >= p0["price"]: return None
+        if p3["price"] >= p2["price"]: return None
+        if p3["price"] >= p1["price"]: return None
+        if p4["price"] <= p3["price"]: return None
+        if p4["price"] >= p1["price"]: return None
+        if p5["price"] >= p4["price"]: return None
     w1 = _wave_len(p0, p1)
     w2 = _wave_len(p1, p2)
     w3 = _wave_len(p2, p3)
     w4 = _wave_len(p3, p4)
-    if min(w1, w2, w3, w4) <= 0:
+    w5 = _wave_len(p4, p5)
+    if min(w1, w2, w3, w4, w5) <= 0:
         return None
     score = 0.0
     rules = []
-    if direction == 1:
-        if p2["price"] <= p0["price"]: return None
-        if p4["price"] <= p1["price"]: return None
-        if p4["price"] >= p1["price"] and p4["price"] <= p0["price"]: return None
-    else:
-        if p2["price"] >= p0["price"]: return None
-        if p4["price"] >= p1["price"]: return None
     rules.append("structure_valid"); score += 4.0
-    m1, m3, m5 = w1, w3, w4
-    if m3 == min(m1, m3, m5): return None
+    if w3 == min(w1, w3, w5): return None
     rules.append("wave3_not_shortest"); score += 3.0
     r2 = w2 / w1
     score += _fib_score(r2, [0.382, 0.5, 0.618, 0.786]) * 2.0
@@ -354,16 +365,16 @@ def _score_impulse(seq):
     r4 = w4 / w3
     score += _fib_score(r4, [0.236, 0.382, 0.5]) * 2.0
     if _between(r4, 0.236, 0.618): rules.append("wave4_fib")
-    r5 = m5 / w1
+    r5 = w5 / w1
     score += _fib_score(r5, [0.618, 1.0, 1.618]) * 1.5
-    if m3 > m1: score += 1.0
-    if m3 > m5: score += 1.0
+    if w3 > w1: score += 1.0
+    if w3 > w5: score += 1.0
     return {
         "score": round(score, 3),
         "direction": "bullish" if direction == 1 else "bearish",
         "rules": rules,
-        "points": seq,
-        "w1": w1, "w2": w2, "w3": w3, "w4": w4,
+        "points": [p0, p1, p2, p3, p4, p5],
+        "w1": w1, "w2": w2, "w3": w3, "w4": w4, "w5": w5,
     }
 
 def _score_abc(seq):
@@ -442,14 +453,14 @@ def _best_impulse(pivots):
         return None
     best = None
     n = len(pivots)
-    for i in range(0, n - 4):
-        seq = pivots[i:i+5]
+    for i in range(0, n - 5):
+        seq = pivots[i:i+6]
         scored = _score_impulse(seq)
         if scored is None:
             continue
         if scored["score"] < 8.0:
             continue
-        recency = i / max(n - 4, 1)
+        recency = i / max(n - 5, 1)
         scored["adjusted"] = scored["score"] + recency * 6.0
         if best is None or scored["adjusted"] > best["adjusted"]:
             best = scored
@@ -483,7 +494,7 @@ def _build_elliott_analysis(pivots):
     main_sc = _build_main_scenario(best, current_wave, fib_targets, pivots)
     alt_sc = _build_alt_scenario(best, current_wave, fib_targets, pivots)
     labels = []
-    for i, name in enumerate(["1", "2", "3", "4", "5"]):
+    for i, name in enumerate(["1", "2", "3", "4", "5"], 1):
         pt = best["points"][i]
         labels.append({"time": pt["time"], "price": pt["price"], "text": name})
     confidence = "high" if best["score"] >= 14 else "medium" if best["score"] >= 10 else "low"
