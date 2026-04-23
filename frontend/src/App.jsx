@@ -198,18 +198,69 @@ export default function App() {
 
       const cs = mainChart.addCandlestickSeries({ priceLineVisible: false, lastValueVisible: false })
 
+      const elliott = data.elliott || {}
+      const ePivots = Array.isArray(elliott.pivots) ? elliott.pivots : []
+      const eLabels = Array.isArray(elliott.labels) ? elliott.labels : []
+      const mainSc = elliott.main_scenario || null
+      const altSc = elliott.alt_scenario || null
+      const eStructure = elliott.current_structure || ""
+      const eConf = elliott.confidence || "none"
+      const eDir = elliott.direction || ""
+
       const cs2 = elliottChart.addCandlestickSeries({ priceLineVisible: false, lastValueVisible: false })
       cs2.setData(candles)
+
       const zz2 = elliottChart.addLineSeries({ lineWidth: 2, color: "rgba(255,215,0,0.85)", priceLineVisible: false, lastValueVisible: false })
-      const elliott = data.elliott || {}
-      const piv2 = Array.isArray(elliott.pivots) && elliott.pivots.length
-        ? elliott.pivots.filter(x => isTime(x.time) && isNum(x.price)).map(x => ({ time: x.time, value: Number(x.price) }))
-        : ellLineData(candles)
-      const markers2 = Array.isArray(elliott.labels) && elliott.labels.length
-        ? elliott.labels.filter(x => isTime(x.time) && isNum(x.price)).map(x => ({ time: x.time, position: "aboveBar", color: "rgba(255,255,255,0.9)", shape: "circle", text: String(x.text || "") }))
-        : ellMarkers(piv2)
-      try { zz2.setData(piv2) } catch {}
-      try { cs2.setMarkers(markers2) } catch {}
+      const piv2 = ePivots.filter(x => isTime(x.time) && isNum(x.price)).map(x => ({ time: x.time, value: Number(x.price) }))
+      if (piv2.length > 1) { try { zz2.setData(piv2) } catch {} }
+
+      const markers2 = eLabels
+        .filter(x => isTime(x.time) && isNum(x.price))
+        .map(x => ({
+          time: x.time,
+          position: x.text === "2" || x.text === "4" || x.text === "B" ? "belowBar" : "aboveBar",
+          color: x.text === "3" ? "rgba(52,199,89,1)" : x.text === "A" || x.text === "C" ? "rgba(255,100,100,1)" : "rgba(255,255,255,0.95)",
+          shape: "circle",
+          text: String(x.text || "")
+        }))
+      if (markers2.length > 0) { try { cs2.setMarkers(markers2) } catch {} }
+
+      if (mainSc && mainSc.target_zone && mainSc.target_zone.length === 2) {
+        const mLow = Math.min(...mainSc.target_zone)
+        const mHigh = Math.max(...mainSc.target_zone)
+        const mMid = (mLow + mHigh) / 2
+        const tLast = candles[candles.length - 1].time
+        elliottChart.addLineSeries({ lineWidth: 2, color: "rgba(52,199,89,0.9)", lineStyle: 2, priceLineVisible: false, lastValueVisible: false })
+          .setData([{ time: candles[Math.max(0,candles.length-60)].time, value: mMid }, { time: tLast, value: mMid }])
+        cs2.createPriceLine({ price: mHigh, color: "rgba(52,199,89,0.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `Ziel ${mainSc.probability||""}%` })
+        cs2.createPriceLine({ price: mLow, color: "rgba(52,199,89,0.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" })
+      }
+
+      if (altSc && altSc.target_zone && altSc.target_zone.length === 2) {
+        const aLow = Math.min(...altSc.target_zone)
+        const aHigh = Math.max(...altSc.target_zone)
+        cs2.createPriceLine({ price: aHigh, color: "rgba(255,160,50,0.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `Alt ${altSc.probability||""}%` })
+        cs2.createPriceLine({ price: aLow, color: "rgba(255,160,50,0.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" })
+      }
+
+      const infoDiv = elliottRef.current?.querySelector(".elliott-info")
+      if (elliottRef.current && eStructure) {
+        let box = elliottRef.current.querySelector(".elliott-info")
+        if (!box) {
+          box = document.createElement("div")
+          box.className = "elliott-info"
+          elliottRef.current.appendChild(box)
+        }
+        const confColor = eConf === "high" ? "#34c759" : eConf === "medium" ? "#fbbf24" : "#9ca3af"
+        const dirIcon = eDir === "bullish" ? "▲" : eDir === "bearish" ? "▼" : ""
+        box.style.cssText = "position:absolute;top:8px;left:12px;z-index:10;background:rgba(11,15,25,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:8px 12px;font-size:12px;color:#e2e8f0;max-width:320px;pointer-events:none;"
+        let html = `<div style="font-weight:700;font-size:13px;color:${confColor};margin-bottom:4px;">${dirIcon} ${eStructure}</div>`
+        if (mainSc) html += `<div style="color:rgba(52,199,89,0.9);margin-bottom:2px;">▶ ${mainSc.description} ${mainSc.probability ? "("+mainSc.probability+"%)" : ""}</div>`
+        if (mainSc?.target_zone) html += `<div style="color:rgba(52,199,89,0.7);font-size:11px;margin-bottom:4px;">  Zielzone: $${mainSc.target_zone[0]} – $${mainSc.target_zone[1]}</div>`
+        if (altSc) html += `<div style="color:rgba(255,160,50,0.9);margin-bottom:2px;">◀ ${altSc.description} ${altSc.probability ? "("+altSc.probability+"%)" : ""}</div>`
+        if (altSc?.target_zone) html += `<div style="color:rgba(255,160,50,0.7);font-size:11px;">  Zielzone: $${altSc.target_zone[0]} – $${altSc.target_zone[1]}</div>`
+        box.innerHTML = html
+      }
 
       cs.setData(candles)
 
