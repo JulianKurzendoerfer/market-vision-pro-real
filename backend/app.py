@@ -306,172 +306,325 @@ def _wave_len(a, b):
 def _between(v, lo, hi):
     return lo <= v <= hi
 
-def _impulse_direction(seq):
-    if len(seq) != 5:
-        return 0
-    d1 = seq[1]["price"] - seq[0]["price"]
-    d2 = seq[2]["price"] - seq[1]["price"]
-    d3 = seq[3]["price"] - seq[2]["price"]
-    d4 = seq[4]["price"] - seq[3]["price"]
-    if d1 > 0 and d2 < 0 and d3 > 0 and d4 < 0:
-        return 1
-    if d1 < 0 and d2 > 0 and d3 < 0 and d4 > 0:
-        return -1
-    return 0
+def _fib_score(ratio, targets):
+    for t in targets:
+        if abs(ratio - t) / t < 0.08:
+            return 1.0
+    for t in targets:
+        if abs(ratio - t) / t < 0.15:
+            return 0.5
+    return 0.0
 
 def _score_impulse(seq):
     if len(seq) != 5:
         return None
-
-    direction = _impulse_direction(seq)
-    if direction == 0:
+    p0, p1, p2, p3, p4 = seq
+    d0 = p1["price"] - p0["price"]
+    d1 = p2["price"] - p1["price"]
+    d2 = p3["price"] - p2["price"]
+    d3 = p4["price"] - p3["price"]
+    if not (d0 > 0 and d1 < 0 and d2 > 0 and d3 < 0) and        not (d0 < 0 and d1 > 0 and d2 < 0 and d3 > 0):
         return None
-
-    p1, p2, p3, p4, p5 = seq
-
-    w1 = _wave_len(p1, p2)
-    w2 = _wave_len(p2, p3)
-    w3 = _wave_len(p3, p4)
-    w4 = _wave_len(p4, p5)
-
+    direction = 1 if d0 > 0 else -1
+    w1 = _wave_len(p0, p1)
+    w2 = _wave_len(p1, p2)
+    w3 = _wave_len(p2, p3)
+    w4 = _wave_len(p3, p4)
     if min(w1, w2, w3, w4) <= 0:
         return None
-
     score = 0.0
     rules = []
-
     if direction == 1:
-        if p3["price"] <= p1["price"]:
-            return None
-        rules.append("wave2_valid")
-        score += 2.0
-
-        if p5["price"] <= p2["price"]:
-            return None
-        rules.append("wave4_valid")
-        score += 2.0
-
-        top1 = max(p1["price"], p2["price"])
-        bot1 = min(p1["price"], p2["price"])
-        if p5["price"] <= top1 and p5["price"] >= bot1:
-            return None
-        rules.append("no_overlap")
-        score += 2.0
-
+        if p2["price"] <= p0["price"]: return None
+        if p4["price"] <= p1["price"]: return None
+        if p4["price"] >= p1["price"] and p4["price"] <= p0["price"]: return None
     else:
-        if p3["price"] >= p1["price"]:
-            return None
-        rules.append("wave2_valid")
-        score += 2.0
-
-        if p5["price"] >= p2["price"]:
-            return None
-        rules.append("wave4_valid")
-        score += 2.0
-
-        top1 = max(p1["price"], p2["price"])
-        bot1 = min(p1["price"], p2["price"])
-        if p5["price"] <= top1 and p5["price"] >= bot1:
-            return None
-        rules.append("no_overlap")
-        score += 2.0
-
-    motive1 = w1
-    motive3 = w3
-    motive5 = _wave_len(p4, p5)
-
-    shortest = min(motive1, motive3, motive5)
-    if motive3 == shortest:
-        return None
-    rules.append("wave3_not_shortest")
-    score += 3.0
-
-    r2 = w2 / w1 if w1 else 999
-    if _between(r2, 0.382, 0.786):
-        score += 2.0
-        rules.append("wave2_fib")
-    elif _between(r2, 0.236, 0.886):
-        score += 1.0
-
-    r3 = w3 / w1 if w1 else 999
-    if _between(r3, 1.382, 2.000):
-        score += 3.0
-        rules.append("wave3_fib")
-    elif _between(r3, 1.0, 2.618):
-        score += 1.5
-
-    r4 = w4 / w3 if w3 else 999
-    if _between(r4, 0.236, 0.5):
-        score += 2.0
-        rules.append("wave4_fib")
-    elif _between(r4, 0.146, 0.618):
-        score += 1.0
-
-    r5 = motive5 / w1 if w1 else 999
-    if _between(r5, 0.5, 1.2):
-        score += 1.5
-        rules.append("wave5_fib")
-
-    if motive3 > motive1:
-        score += 1.0
-    if motive3 > motive5:
-        score += 1.0
-
+        if p2["price"] >= p0["price"]: return None
+        if p4["price"] >= p1["price"]: return None
+    rules.append("structure_valid"); score += 4.0
+    m1, m3, m5 = w1, w3, w4
+    if m3 == min(m1, m3, m5): return None
+    rules.append("wave3_not_shortest"); score += 3.0
+    r2 = w2 / w1
+    score += _fib_score(r2, [0.382, 0.5, 0.618, 0.786]) * 2.0
+    if _between(r2, 0.382, 0.786): rules.append("wave2_fib")
+    r3 = w3 / w1
+    score += _fib_score(r3, [1.618, 2.0, 2.618]) * 3.0
+    if _between(r3, 1.382, 2.618): rules.append("wave3_fib")
+    r4 = w4 / w3
+    score += _fib_score(r4, [0.236, 0.382, 0.5]) * 2.0
+    if _between(r4, 0.236, 0.618): rules.append("wave4_fib")
+    r5 = m5 / w1
+    score += _fib_score(r5, [0.618, 1.0, 1.618]) * 1.5
+    if m3 > m1: score += 1.0
+    if m3 > m5: score += 1.0
     return {
         "score": round(score, 3),
         "direction": "bullish" if direction == 1 else "bearish",
         "rules": rules,
         "points": seq,
+        "w1": w1, "w2": w2, "w3": w3, "w4": w4,
     }
+
+def _score_abc(seq):
+    if len(seq) != 3:
+        return None
+    a, b, c = seq
+    da = b["price"] - a["price"]
+    db = c["price"] - b["price"]
+    if not (da != 0 and db != 0 and (da > 0) != (db > 0)):
+        return None
+    direction = 1 if da < 0 else -1
+    wa = _wave_len(a, b)
+    wb = _wave_len(b, c)
+    wc = _wave_len(c if len(seq) > 2 else b, seq[-1])
+    score = 2.0
+    rc = wa / wa if wa == 0 else wb / wa
+    if _between(rc, 0.5, 0.786): score += 1.5
+    rc2 = wc / wa if wa else 1
+    if _between(rc2, 0.618, 1.618): score += 1.5
+    return {
+        "score": round(score, 3),
+        "direction": "bullish" if direction == 1 else "bearish",
+        "type": "abc",
+        "points": seq,
+        "wa": wa, "wb": wb, "wc": wc,
+    }
+
+def _determine_current_wave(pivots, best):
+    if not best or not best.get("points"):
+        return "unknown", None
+    pts = best["points"]
+    last_pivot = pivots[-1] if pivots else None
+    if not last_pivot:
+        return "unknown", None
+    last_pt = pts[-1]
+    if last_pivot["time"] == last_pt["time"]:
+        return "after_5", pts[-1]
+    for i, pt in enumerate(pts):
+        if pt["time"] == last_pivot["time"]:
+            return f"in_wave_{i+1}", pt
+    p4, p5 = pts[3], pts[4]
+    if last_pivot["price"] > p5["price"] and best["direction"] == "bullish":
+        return "extension_possible", last_pivot
+    if last_pivot["price"] < p5["price"] and best["direction"] == "bearish":
+        return "extension_possible", last_pivot
+    return "corrective_after_5", last_pivot
+
+def _fibonacci_targets(best, pivots):
+    if not best:
+        return []
+    pts = best["points"]
+    direction = best["direction"]
+    w1 = best.get("w1", 0)
+    w3 = best.get("w3", 0)
+    targets = []
+    if direction == "bullish":
+        base = pts[4]["price"]
+        targets.append({"label": "W5_ext_100", "price": round(base + w1, 2)})
+        targets.append({"label": "W5_ext_162", "price": round(base + w1 * 1.618, 2)})
+        corr_base = pts[4]["price"] if len(pts) >= 5 else pts[-1]["price"]
+        wave_up = abs(pts[4]["price"] - pts[0]["price"])
+        targets.append({"label": "corr_382", "price": round(corr_base - wave_up * 0.382, 2)})
+        targets.append({"label": "corr_618", "price": round(corr_base - wave_up * 0.618, 2)})
+    else:
+        base = pts[4]["price"]
+        targets.append({"label": "W5_ext_100", "price": round(base - w1, 2)})
+        targets.append({"label": "W5_ext_162", "price": round(base - w1 * 1.618, 2)})
+        corr_base = pts[4]["price"]
+        wave_down = abs(pts[0]["price"] - pts[4]["price"])
+        targets.append({"label": "corr_382", "price": round(corr_base + wave_down * 0.382, 2)})
+        targets.append({"label": "corr_618", "price": round(corr_base + wave_down * 0.618, 2)})
+    return targets
 
 def _best_impulse(pivots):
     if len(pivots) < 5:
         return None
-
     best = None
     n = len(pivots)
-
     for i in range(0, n - 4):
         seq = pivots[i:i+5]
         scored = _score_impulse(seq)
         if scored is None:
             continue
-        if scored["score"] < 10.0:
+        if scored["score"] < 8.0:
             continue
         recency = i / max(n - 4, 1)
-        scored["adjusted"] = scored["score"] + recency * 5.0
+        scored["adjusted"] = scored["score"] + recency * 6.0
         if best is None or scored["adjusted"] > best["adjusted"]:
             best = scored
-
     return best
 
-def _elliott_labels(pivots):
-    best = _best_impulse(pivots)
-    if not best:
-        return {
-            "pivots": pivots,
-            "labels": [],
-            "score": None,
-            "direction": None,
-            "rule_flags": [],
-        }
+def _build_elliott_analysis(pivots):
+    if not pivots or len(pivots) < 5:
+        return _empty_elliott()
 
+    best = _best_impulse(pivots)
+
+    if not best:
+        abc = None
+        for i in range(len(pivots) - 2):
+            r = _score_abc(pivots[i:i+3])
+            if r and (abc is None or r["score"] > abc["score"]):
+                abc = r
+        if abc:
+            return {
+                "current_structure": "ABC-Korrektur",
+                "confidence": "low",
+                "main_scenario": _abc_scenario(abc, pivots),
+                "alt_scenario": None,
+                "labels": _abc_labels(abc),
+                "pivots": pivots,
+            }
+        return _empty_elliott()
+
+    current_wave, _ = _determine_current_wave(pivots, best)
+    fib_targets = _fibonacci_targets(best, pivots)
+    main_sc = _build_main_scenario(best, current_wave, fib_targets, pivots)
+    alt_sc = _build_alt_scenario(best, current_wave, fib_targets, pivots)
     labels = []
     for i, name in enumerate(["1", "2", "3", "4", "5"]):
         pt = best["points"][i]
-        labels.append({
-            "time": pt["time"],
-            "price": pt["price"],
-            "text": name
-        })
-
+        labels.append({"time": pt["time"], "price": pt["price"], "text": name})
+    confidence = "high" if best["score"] >= 14 else "medium" if best["score"] >= 10 else "low"
+    structure = _describe_structure(current_wave, best)
     return {
-        "pivots": pivots,
-        "labels": labels,
+        "current_structure": structure,
+        "confidence": confidence,
         "score": best["score"],
         "direction": best["direction"],
-        "rule_flags": best["rules"],
+        "main_scenario": main_sc,
+        "alt_scenario": alt_sc,
+        "labels": labels,
+        "pivots": pivots,
+        "rule_flags": best.get("rules", []),
     }
+
+def _describe_structure(current_wave, best):
+    d = "bullish" if best["direction"] == "bullish" else "bearish"
+    wave_names = {
+        "in_wave_1": "Welle 1 aktiv",
+        "in_wave_2": "Welle 2 Korrektur",
+        "in_wave_3": "Welle 3 aktiv (stärkste Welle)",
+        "in_wave_4": "Welle 4 Korrektur",
+        "in_wave_5": "Welle 5 aktiv",
+        "after_5": "Impuls abgeschlossen - Korrektur erwartet",
+        "corrective_after_5": "Korrektur nach Impuls",
+        "extension_possible": "Mögliche Wellenverlängerung",
+    }
+    return wave_names.get(current_wave, f"Impulsstruktur ({d})")
+
+def _build_main_scenario(best, current_wave, fib_targets, pivots):
+    pts = best["points"]
+    direction = best["direction"]
+    last_price = pivots[-1]["price"] if pivots else pts[-1]["price"]
+    targets_up = [t for t in fib_targets if t["price"] > last_price]
+    targets_down = [t for t in fib_targets if t["price"] < last_price]
+    if current_wave in ("after_5", "corrective_after_5"):
+        zone = [targets_down[0]["price"], targets_down[1]["price"]] if len(targets_down) >= 2 else None
+        desc = "Korrektur nach abgeschlossenem Impuls"
+        prob = 60
+        future = _project_correction(pts, direction)
+    elif "wave_3" in current_wave or "wave_5" in current_wave:
+        zone = [targets_up[0]["price"], targets_up[1]["price"]] if len(targets_up) >= 2 else None
+        desc = "Impuls setzt sich fort"
+        prob = 65
+        future = _project_continuation(pts, direction, fib_targets)
+    else:
+        zone = [targets_up[0]["price"], targets_up[1]["price"]] if len(targets_up) >= 2 else None
+        desc = "Impulsstruktur läuft weiter"
+        prob = 58
+        future = _project_continuation(pts, direction, fib_targets)
+    if zone:
+        zone = [round(min(zone), 2), round(max(zone), 2)]
+    return {
+        "description": desc,
+        "probability": prob,
+        "target_zone": zone,
+        "future_path": future,
+    }
+
+def _build_alt_scenario(best, current_wave, fib_targets, pivots):
+    pts = best["points"]
+    direction = best["direction"]
+    last_price = pivots[-1]["price"] if pivots else pts[-1]["price"]
+    targets_down = [t for t in fib_targets if t["price"] < last_price]
+    targets_up = [t for t in fib_targets if t["price"] > last_price]
+    if current_wave in ("after_5", "corrective_after_5"):
+        zone = [targets_up[0]["price"], targets_up[1]["price"]] if len(targets_up) >= 2 else None
+        desc = "Impuls setzt sich direkt fort (Welle 3 Extension)"
+        prob = 40
+        future = _project_continuation(pts, direction, fib_targets)
+    else:
+        zone = [targets_down[0]["price"], targets_down[1]["price"]] if len(targets_down) >= 2 else None
+        desc = "Impuls beendet, tiefere Korrektur"
+        prob = 35
+        future = _project_correction(pts, direction)
+    if zone:
+        zone = [round(min(zone), 2), round(max(zone), 2)]
+    return {
+        "description": desc,
+        "probability": prob,
+        "target_zone": zone,
+        "future_path": future,
+    }
+
+def _project_continuation(pts, direction, fib_targets):
+    if not pts or not fib_targets:
+        return []
+    last = pts[-1]
+    targets_fwd = sorted(
+        [t for t in fib_targets if (direction == "bullish" and t["price"] > last["price"]) or
+                                    (direction == "bearish" and t["price"] < last["price"])],
+        key=lambda x: abs(x["price"] - last["price"])
+    )
+    if not targets_fwd:
+        return []
+    return [
+        {"time": last["time"], "price": last["price"], "projected": True},
+        {"time": "projection", "price": targets_fwd[0]["price"], "projected": True},
+    ]
+
+def _project_correction(pts, direction):
+    if len(pts) < 5:
+        return []
+    p0, p4 = pts[0], pts[4]
+    total = abs(p4["price"] - p0["price"])
+    corr_382 = p4["price"] - total * 0.382 if direction == "bullish" else p4["price"] + total * 0.382
+    corr_618 = p4["price"] - total * 0.618 if direction == "bullish" else p4["price"] + total * 0.618
+    return [
+        {"time": p4["time"], "price": p4["price"], "projected": True},
+        {"time": "projection_a", "price": round(corr_382, 2), "projected": True},
+        {"time": "projection_b", "price": round(corr_618, 2), "projected": True},
+    ]
+
+def _abc_scenario(abc, pivots):
+    last = pivots[-1]["price"] if pivots else 0
+    return {
+        "description": "ABC-Korrektur läuft",
+        "probability": 55,
+        "target_zone": None,
+        "future_path": [],
+    }
+
+def _abc_labels(abc):
+    names = ["A", "B", "C"]
+    return [{"time": abc["points"][i]["time"], "price": abc["points"][i]["price"], "text": names[i]} for i in range(3)]
+
+def _empty_elliott():
+    return {
+        "current_structure": "Keine klare Struktur erkannt",
+        "confidence": "none",
+        "main_scenario": None,
+        "alt_scenario": None,
+        "labels": [],
+        "pivots": [],
+        "rule_flags": [],
+    }
+
+def _elliott_labels(pivots):
+    result = _build_elliott_analysis(pivots)
+    return result
 
 @app.get("/api/tv")
 def tv(
@@ -548,7 +701,7 @@ def tv(
             levels = _sr_levels(candles, current_price=closes[-1])
             ell_candles = candles[-300:] if len(candles) > 300 else candles
             pivots = _zigzag_pivots(ell_candles, deviation=0.04, min_bars=5)
-            elliott = {"pivots": pivots, "labels": _elliott_labels(pivots)}
+            elliott = _elliott_labels(pivots)
             return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels, "elliott": elliott}
     except Exception as e:
         import traceback
