@@ -415,10 +415,15 @@ def _determine_current_wave(pivots, best):
     for i, pt in enumerate(pts):
         if pt["time"] == last_pivot["time"]:
             return f"in_wave_{i+1}", pt
-    p4, p5 = pts[3], pts[4]
-    if last_pivot["price"] > p5["price"] and best["direction"] == "bullish":
+    wave5 = pts[5] if len(pts) > 5 else pts[-1]
+    wave5_idx = wave5.get("idx", 0)
+    last_idx = last_pivot.get("idx", 999)
+    if last_idx > wave5_idx:
+        return "corrective_after_5", last_pivot
+    p4 = pts[4] if len(pts) > 4 else pts[-1]
+    if best["direction"] == "bullish" and last_pivot["price"] > wave5["price"]:
         return "extension_possible", last_pivot
-    if last_pivot["price"] < p5["price"] and best["direction"] == "bearish":
+    if best["direction"] == "bearish" and last_pivot["price"] < wave5["price"]:
         return "extension_possible", last_pivot
     return "corrective_after_5", last_pivot
 
@@ -430,22 +435,26 @@ def _fibonacci_targets(best, pivots):
     w1 = best.get("w1", 0)
     w3 = best.get("w3", 0)
     targets = []
+    wave5_pt = pts[5] if len(pts) > 5 else pts[-1]
+    wave0_pt = pts[0]
     if direction == "bullish":
-        base = pts[4]["price"]
-        targets.append({"label": "W5_ext_100", "price": round(base + w1, 2)})
-        targets.append({"label": "W5_ext_162", "price": round(base + w1 * 1.618, 2)})
-        corr_base = pts[4]["price"] if len(pts) >= 5 else pts[-1]["price"]
-        wave_up = abs(pts[4]["price"] - pts[0]["price"])
-        targets.append({"label": "corr_382", "price": round(corr_base - wave_up * 0.382, 2)})
-        targets.append({"label": "corr_618", "price": round(corr_base - wave_up * 0.618, 2)})
+        top = wave5_pt["price"]
+        bottom = wave0_pt["price"]
+        wave_up = abs(top - bottom)
+        targets.append({"label": "W5_ext_100", "price": round(top + w1, 2)})
+        targets.append({"label": "W5_ext_162", "price": round(top + w1 * 1.618, 2)})
+        targets.append({"label": "corr_382", "price": round(top - wave_up * 0.382, 2)})
+        targets.append({"label": "corr_500", "price": round(top - wave_up * 0.500, 2)})
+        targets.append({"label": "corr_618", "price": round(top - wave_up * 0.618, 2)})
     else:
-        base = pts[4]["price"]
-        targets.append({"label": "W5_ext_100", "price": round(base - w1, 2)})
-        targets.append({"label": "W5_ext_162", "price": round(base - w1 * 1.618, 2)})
-        corr_base = pts[4]["price"]
-        wave_down = abs(pts[0]["price"] - pts[4]["price"])
-        targets.append({"label": "corr_382", "price": round(corr_base + wave_down * 0.382, 2)})
-        targets.append({"label": "corr_618", "price": round(corr_base + wave_down * 0.618, 2)})
+        bottom = wave5_pt["price"]
+        top = wave0_pt["price"]
+        wave_down = abs(top - bottom)
+        targets.append({"label": "W5_ext_100", "price": round(bottom - w1, 2)})
+        targets.append({"label": "W5_ext_162", "price": round(bottom - w1 * 1.618, 2)})
+        targets.append({"label": "corr_382", "price": round(bottom + wave_down * 0.382, 2)})
+        targets.append({"label": "corr_500", "price": round(bottom + wave_down * 0.500, 2)})
+        targets.append({"label": "corr_618", "price": round(bottom + wave_down * 0.618, 2)})
     return targets
 
 def _best_impulse(pivots):
