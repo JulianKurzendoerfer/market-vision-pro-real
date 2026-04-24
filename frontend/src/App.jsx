@@ -210,16 +210,24 @@ export default function App() {
       const cs2 = elliottChart.addCandlestickSeries({ priceLineVisible: false, lastValueVisible: false })
       cs2.setData(candles)
 
-      const zz2 = elliottChart.addLineSeries({ lineWidth: 2, color: "rgba(255,215,0,0.85)", priceLineVisible: false, lastValueVisible: false })
-      const piv2 = ePivots.filter(x => isTime(x.time) && isNum(x.price)).map(x => ({ time: x.time, value: Number(x.price) }))
-      if (piv2.length > 1) { try { zz2.setData(piv2) } catch {} }
+      const allPivots = ePivots.filter(x => isTime(x.time) && isNum(x.price))
+      const lastCandle = candles[candles.length - 1]
+      const lastClose = lastCandle?.close || 0
+      const lastTime = lastCandle?.time
+
+      const zzData = allPivots.map(x => ({ time: x.time, value: Number(x.price) }))
+      if (lastTime && lastClose && (zzData.length === 0 || zzData[zzData.length-1].time !== lastTime)) {
+        zzData.push({ time: lastTime, value: lastClose })
+      }
+      const zz2 = elliottChart.addLineSeries({ lineWidth: 2, color: "rgba(255,215,0,0.75)", priceLineVisible: false, lastValueVisible: false })
+      if (zzData.length > 1) { try { zz2.setData(zzData) } catch {} }
 
       const markers2 = eLabels
         .filter(x => isTime(x.time) && isNum(x.price))
         .map(x => ({
           time: x.time,
           position: x.text === "2" || x.text === "4" || x.text === "B" ? "belowBar" : "aboveBar",
-          color: x.text === "3" ? "rgba(52,199,89,1)" : x.text === "A" || x.text === "C" ? "rgba(255,100,100,1)" : "rgba(255,255,255,0.95)",
+          color: x.text === "3" ? "rgba(52,199,89,1)" : x.text === "5" ? "rgba(255,200,0,1)" : x.text === "A" || x.text === "C" ? "rgba(255,100,100,1)" : "rgba(255,255,255,0.95)",
           shape: "circle",
           text: String(x.text || "")
         }))
@@ -228,23 +236,19 @@ export default function App() {
       if (mainSc && mainSc.target_zone && mainSc.target_zone.length === 2) {
         const mLow = Math.min(...mainSc.target_zone)
         const mHigh = Math.max(...mainSc.target_zone)
-        const mMid = (mLow + mHigh) / 2
-        const tLast = candles[candles.length - 1].time
-        elliottChart.addLineSeries({ lineWidth: 2, color: "rgba(52,199,89,0.9)", lineStyle: 2, priceLineVisible: false, lastValueVisible: false })
-          .setData([{ time: candles[Math.max(0,candles.length-60)].time, value: mMid }, { time: tLast, value: mMid }])
-        cs2.createPriceLine({ price: mHigh, color: "rgba(52,199,89,0.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `Ziel ${mainSc.probability||""}%` })
-        cs2.createPriceLine({ price: mLow, color: "rgba(52,199,89,0.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" })
+        cs2.createPriceLine({ price: mHigh, color: "rgba(52,199,89,0.85)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `▼ Ziel ${mainSc.probability||""}%  $${mHigh}` })
+        cs2.createPriceLine({ price: mLow, color: "rgba(52,199,89,0.85)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `$${mLow}` })
       }
 
       if (altSc && altSc.target_zone && altSc.target_zone.length === 2) {
         const aLow = Math.min(...altSc.target_zone)
         const aHigh = Math.max(...altSc.target_zone)
-        cs2.createPriceLine({ price: aHigh, color: "rgba(255,160,50,0.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `Alt ${altSc.probability||""}%` })
-        cs2.createPriceLine({ price: aLow, color: "rgba(255,160,50,0.7)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" })
+        cs2.createPriceLine({ price: aHigh, color: "rgba(255,160,50,0.85)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `▲ Alt ${altSc.probability||""}%  $${aHigh}` })
+        cs2.createPriceLine({ price: aLow, color: "rgba(255,160,50,0.85)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `$${aLow}` })
       }
 
-      const infoDiv = elliottRef.current?.querySelector(".elliott-info")
       if (elliottRef.current && eStructure) {
+        elliottRef.current.style.position = "relative"
         let box = elliottRef.current.querySelector(".elliott-info")
         if (!box) {
           box = document.createElement("div")
@@ -253,12 +257,16 @@ export default function App() {
         }
         const confColor = eConf === "high" ? "#34c759" : eConf === "medium" ? "#fbbf24" : "#9ca3af"
         const dirIcon = eDir === "bullish" ? "▲" : eDir === "bearish" ? "▼" : ""
-        box.style.cssText = "position:absolute;top:8px;left:12px;z-index:10;background:rgba(11,15,25,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:8px 12px;font-size:12px;color:#e2e8f0;max-width:320px;pointer-events:none;"
+        box.style.cssText = "position:absolute;top:8px;left:12px;z-index:20;background:rgba(11,15,25,0.90);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:8px 14px;font-size:12px;color:#e2e8f0;max-width:300px;pointer-events:none;line-height:1.6;"
         let html = `<div style="font-weight:700;font-size:13px;color:${confColor};margin-bottom:4px;">${dirIcon} ${eStructure}</div>`
-        if (mainSc) html += `<div style="color:rgba(52,199,89,0.9);margin-bottom:2px;">▶ ${mainSc.description} ${mainSc.probability ? "("+mainSc.probability+"%)" : ""}</div>`
-        if (mainSc?.target_zone) html += `<div style="color:rgba(52,199,89,0.7);font-size:11px;margin-bottom:4px;">  Zielzone: $${mainSc.target_zone[0]} – $${mainSc.target_zone[1]}</div>`
-        if (altSc) html += `<div style="color:rgba(255,160,50,0.9);margin-bottom:2px;">◀ ${altSc.description} ${altSc.probability ? "("+altSc.probability+"%)" : ""}</div>`
-        if (altSc?.target_zone) html += `<div style="color:rgba(255,160,50,0.7);font-size:11px;">  Zielzone: $${altSc.target_zone[0]} – $${altSc.target_zone[1]}</div>`
+        if (mainSc) {
+          html += `<div style="color:rgba(52,199,89,1);margin-bottom:1px;">▼ ${mainSc.description} (${mainSc.probability||"?"}%)</div>`
+          if (mainSc.target_zone) html += `<div style="color:rgba(52,199,89,0.7);font-size:11px;margin-bottom:5px;">&nbsp;&nbsp;Zone: $${mainSc.target_zone[0]} – $${mainSc.target_zone[1]}</div>`
+        }
+        if (altSc) {
+          html += `<div style="color:rgba(255,160,50,1);margin-bottom:1px;">▲ ${altSc.description} (${altSc.probability||"?"}%)</div>`
+          if (altSc.target_zone) html += `<div style="color:rgba(255,160,50,0.7);font-size:11px;">&nbsp;&nbsp;Zone: $${altSc.target_zone[0]} – $${altSc.target_zone[1]}</div>`
+        }
         box.innerHTML = html
       }
 
