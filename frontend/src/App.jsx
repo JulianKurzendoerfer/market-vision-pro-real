@@ -211,9 +211,9 @@ export default function App() {
       cs2.setData(candles)
 
       const allPivots = ePivots.filter(x => isTime(x.time) && isNum(x.price))
-      const lastCandle = candles[candles.length - 1]
-      const elliottLastClose = lastCandle?.close || 0
-      const lastTime = lastCandle?.time
+      const elliottLastCandle = candles[candles.length - 1]
+      const elliottLastClose = elliottLastCandle?.close || 0
+      const lastTime = elliottLastCandle?.time
 
       const zzData = allPivots.map(x => ({ time: x.time, value: Number(x.price) }))
       if (lastTime && elliottLastClose && (zzData.length === 0 || zzData[zzData.length-1].time !== lastTime)) {
