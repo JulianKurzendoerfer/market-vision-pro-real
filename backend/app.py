@@ -220,9 +220,31 @@ app.add_middleware(
 def health():
     return {"status": "ok"}
 
+def _calc_atr(candles, period=14):
+    if len(candles) < period + 1:
+        closes = [c["close"] for c in candles]
+        highs = [c["high"] for c in candles]
+        lows = [c["low"] for c in candles]
+        trs = [highs[i] - lows[i] for i in range(len(candles))]
+        return sum(trs) / len(trs) if trs else 0.01
+    trs = []
+    for i in range(1, len(candles)):
+        hi = candles[i]["high"]
+        lo = candles[i]["low"]
+        pc = candles[i-1]["close"]
+        trs.append(max(hi - lo, abs(hi - pc), abs(lo - pc)))
+    atr = sum(trs[-period:]) / period
+    return atr
+
 def _zigzag_pivots(candles, deviation=0.06, min_bars=8):
     if not candles or len(candles) < (min_bars + 5):
         return []
+
+    atr = _calc_atr(candles, period=14)
+    mid_price = candles[len(candles)//2]["close"] or 1.0
+    atr_pct = atr / mid_price if mid_price > 0 else deviation
+    adaptive_dev = max(min(atr_pct * 1.5, 0.12), 0.03)
+
     pivots = []
     last_idx = 0
     last_price = candles[0]["close"]
@@ -242,11 +264,11 @@ def _zigzag_pivots(candles, deviation=0.06, min_bars=8):
         if trend == 0:
             up = pct(hi, last_price)
             dn = pct(last_price, lo)
-            if up >= deviation:
+            if up >= adaptive_dev:
                 trend = 1
                 extreme_idx = i
                 extreme_price = hi
-            elif dn >= deviation:
+            elif dn >= adaptive_dev:
                 trend = -1
                 extreme_idx = i
                 extreme_price = lo
@@ -257,7 +279,7 @@ def _zigzag_pivots(candles, deviation=0.06, min_bars=8):
                 extreme_price = hi
                 extreme_idx = i
             rev = pct(extreme_price, lo)
-            if rev >= deviation and (i - extreme_idx) >= min_bars:
+            if rev >= adaptive_dev and (i - extreme_idx) >= min_bars:
                 pivots.append({"idx": extreme_idx, "time": candles[extreme_idx]["time"], "price": float(extreme_price), "type": "H"})
                 trend = -1
                 last_idx = extreme_idx
@@ -270,7 +292,7 @@ def _zigzag_pivots(candles, deviation=0.06, min_bars=8):
                 extreme_price = lo
                 extreme_idx = i
             rev = pct(hi, extreme_price)
-            if rev >= deviation and (i - extreme_idx) >= min_bars:
+            if rev >= adaptive_dev and (i - extreme_idx) >= min_bars:
                 pivots.append({"idx": extreme_idx, "time": candles[extreme_idx]["time"], "price": float(extreme_price), "type": "L"})
                 trend = 1
                 last_idx = extreme_idx
@@ -475,7 +497,34 @@ def _best_impulse(pivots):
             best = scored
     return best
 
-def _build_elliott_analysis(pivots):
+def _momentum_score(candles, p_start, p_end):
+    if not candles or not p_start or not p_end:
+        return 0.0
+    start_idx = p_start.get("idx", 0)
+    end_idx = p_end.get("idx", len(candles)-1)
+    segment = candles[start_idx:end_idx+1]
+    if len(segment) < 5:
+        return 0.0
+    closes = [c["close"] for c in segment]
+    if len(closes) < 2:
+        return 0.0
+    score = 0.0
+    gains = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+    pos = sum(g for g in gains if g > 0)
+    neg = abs(sum(g for g in gains if g < 0))
+    if pos + neg > 0:
+        momentum_ratio = pos / (pos + neg)
+        if momentum_ratio > 0.6:
+            score += 1.0
+        elif momentum_ratio > 0.5:
+            score += 0.5
+    price_move = abs(closes[-1] - closes[0])
+    avg_move = sum(abs(g) for g in gains) / len(gains) if gains else 0
+    if avg_move > 0 and price_move / (avg_move * len(gains)) > 0.5:
+        score += 0.5
+    return score
+
+def _build_elliott_analysis(pivots, candles=None):
     if not pivots or len(pivots) < 5:
         return _empty_elliott()
 
@@ -506,7 +555,12 @@ def _build_elliott_analysis(pivots):
     for i, name in enumerate(["1", "2", "3", "4", "5"], 1):
         pt = best["points"][i]
         labels.append({"time": pt["time"], "price": pt["price"], "text": name})
-    confidence = "high" if best["score"] >= 14 else "medium" if best["score"] >= 10 else "low"
+    mom_score = 0.0
+    if candles and len(best["points"]) >= 4:
+        mom_score = _momentum_score(candles, best["points"][0], best["points"][2])
+        mom_score += _momentum_score(candles, best["points"][2], best["points"][4] if len(best["points"]) > 4 else best["points"][-1])
+    total_score = best["score"] + mom_score
+    confidence = "high" if total_score >= 15 else "medium" if total_score >= 11 else "low"
     structure = _describe_structure(current_wave, best)
     return {
         "current_structure": structure,
@@ -651,8 +705,8 @@ def _empty_elliott():
         "rule_flags": [],
     }
 
-def _elliott_labels(pivots):
-    result = _build_elliott_analysis(pivots)
+def _elliott_labels(pivots, candles=None):
+    result = _build_elliott_analysis(pivots, candles=candles)
     return result
 
 @app.get("/api/tv")
@@ -730,7 +784,7 @@ def tv(
             levels = _sr_levels(candles, current_price=closes[-1])
             ell_candles = candles[-250:] if len(candles) > 250 else candles
             pivots = _zigzag_pivots(ell_candles, deviation=0.06, min_bars=8)
-            elliott = _elliott_labels(pivots)
+            elliott = _elliott_labels(pivots, candles=ell_candles)
             return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels, "elliott": elliott}
     except Exception as e:
         import traceback
