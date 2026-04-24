@@ -415,6 +415,9 @@ export default function App() {
       try { hist.setData(macdBars) } catch {}
       macdChart.addLineSeries({ lineWidth: 1, color: "rgba(255,255,255,0.35)", ...noPriceLine }).setData([{ time: t0, value: 0 }, { time: t1, value: 0 }])
 mainChart.timeScale().fitContent()
+      const nowTs = Math.floor(Date.now() / 1000)
+      const from18m = nowTs - (548 * 24 * 60 * 60)
+      try { mainChart.timeScale().setVisibleRange({ from: from18m, to: nowTs }) } catch {}
       const lr = { from: 0, to: Math.max(0, candles.length - 1) }
       mainChart.timeScale().setVisibleLogicalRange(lr)
       rsiChart.timeScale().setVisibleLogicalRange(lr)
