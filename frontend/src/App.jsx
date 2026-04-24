@@ -212,12 +212,12 @@ export default function App() {
 
       const allPivots = ePivots.filter(x => isTime(x.time) && isNum(x.price))
       const lastCandle = candles[candles.length - 1]
-      const lastClose = lastCandle?.close || 0
+      const elliottLastClose = lastCandle?.close || 0
       const lastTime = lastCandle?.time
 
       const zzData = allPivots.map(x => ({ time: x.time, value: Number(x.price) }))
-      if (lastTime && lastClose && (zzData.length === 0 || zzData[zzData.length-1].time !== lastTime)) {
-        zzData.push({ time: lastTime, value: lastClose })
+      if (lastTime && elliottLastClose && (zzData.length === 0 || zzData[zzData.length-1].time !== lastTime)) {
+        zzData.push({ time: lastTime, value: elliottLastClose })
       }
       const zz2 = elliottChart.addLineSeries({ lineWidth: 2, color: "rgba(255,215,0,0.75)", priceLineVisible: false, lastValueVisible: false })
       if (zzData.length > 1) { try { zz2.setData(zzData) } catch {} }
