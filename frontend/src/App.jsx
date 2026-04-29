@@ -424,11 +424,12 @@ mainChart.timeScale().fitContent()
         mainChart.timeScale().setVisibleRange({ from: fromStr, to: toStr })
       } catch {}
       const lr = { from: 0, to: Math.max(0, candles.length - 1) }
-      mainChart.timeScale().setVisibleLogicalRange(lr)
-      rsiChart.timeScale().setVisibleLogicalRange(lr)
-      stochChart.timeScale().setVisibleLogicalRange(lr)
-      macdChart.timeScale().setVisibleLogicalRange(lr)
-      elliottChart.timeScale().setVisibleLogicalRange(lr)
+      const now18 = new Date()
+      const from18 = new Date(now18)
+      from18.setMonth(from18.getMonth() - 18)
+      const r18from = from18.toISOString().split('T')[0]
+      const r18to = now18.toISOString().split('T')[0]
+      ;[mainChart, rsiChart, stochChart, macdChart, elliottChart].forEach(c => { try { c.timeScale().setVisibleRange({ from: r18from, to: r18to }) } catch {} })
       syncTimeScales(charts.current)
       removeTVAttribution(mainRef.current)
       removeTVAttribution(rsiRef.current)
