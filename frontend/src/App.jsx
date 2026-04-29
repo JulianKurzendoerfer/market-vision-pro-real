@@ -103,6 +103,61 @@ const ellMarkers = (pivots) => {
   }))
 }
 
+const LOGIN_USER = "Julian08527"
+const LOGIN_PASS = "Ju08527"
+
+function LoginGate({ children }) {
+  const [authed, setAuthed] = React.useState(() => sessionStorage.getItem("mvp_auth") === "1")
+  const [user, setUser] = React.useState("")
+  const [pass, setPass] = React.useState("")
+  const [error, setError] = React.useState(false)
+
+  if (authed) return children
+
+  const handleLogin = () => {
+    if (user === LOGIN_USER && pass === LOGIN_PASS) {
+      sessionStorage.setItem("mvp_auth", "1")
+      setAuthed(true)
+    } else {
+      setError(true)
+      setTimeout(() => setError(false), 2000)
+    }
+  }
+
+  return (
+    <LoginGate>
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0b0f19"}}>
+      <div style={{background:"#111827",border:"1px solid rgba(255,255,255,0.1)",borderRadius:"12px",padding:"40px",width:"320px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>
+        <h2 style={{color:"#e2e8f0",textAlign:"center",marginBottom:"8px",fontSize:"22px",fontWeight:"700"}}>Market Vision Pro</h2>
+        <p style={{color:"#64748b",textAlign:"center",marginBottom:"28px",fontSize:"13px"}}>Bitte anmelden</p>
+        <input
+          type="text"
+          placeholder="Benutzername"
+          value={user}
+          onChange={e => setUser(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && handleLogin()}
+          style={{width:"100%",padding:"10px 14px",marginBottom:"12px",background:"#1e293b",border:"1px solid rgba(255,255,255,0.1)",borderRadius:"8px",color:"#e2e8f0",fontSize:"14px",boxSizing:"border-box",outline:"none"}}
+        />
+        <input
+          type="password"
+          placeholder="Passwort"
+          value={pass}
+          onChange={e => setPass(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && handleLogin()}
+          style={{width:"100%",padding:"10px 14px",marginBottom:"16px",background:"#1e293b",border:"1px solid rgba(255,255,255,0.1)",borderRadius:"8px",color:"#e2e8f0",fontSize:"14px",boxSizing:"border-box",outline:"none"}}
+        />
+        {error && <p style={{color:"#ef4444",textAlign:"center",fontSize:"13px",marginBottom:"12px"}}>Falsche Zugangsdaten</p>}
+        <button
+          onClick={handleLogin}
+          style={{width:"100%",padding:"11px",background:"#1d4ed8",border:"none",borderRadius:"8px",color:"white",fontSize:"15px",fontWeight:"600",cursor:"pointer"}}
+        >
+          Anmelden
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [symbol, setSymbol] = useState("AAPL.US")
   const [loading, setLoading] = useState(false)
