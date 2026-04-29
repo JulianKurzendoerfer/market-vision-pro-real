@@ -484,12 +484,16 @@ def _best_impulse(pivots):
         return None
     best = None
     n = len(pivots)
+    last_time = pivots[-1]["time"] if pivots else ""
     for i in range(0, n - 5):
         seq = pivots[i:i+6]
         scored = _score_impulse(seq)
         if scored is None:
             continue
         if scored["score"] < 8.0:
+            continue
+        wave5_time = seq[5]["time"]
+        if last_time and wave5_time[:4] < str(int(last_time[:4]) - 1):
             continue
         recency = i / max(n - 5, 1)
         scored["adjusted"] = scored["score"] + recency * 6.0
