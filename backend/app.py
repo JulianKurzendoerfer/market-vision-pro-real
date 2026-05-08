@@ -162,15 +162,24 @@ def _calc_signal(candles, overlays, elliott):
     reasons = []
     details = {}
 
-    bb_upper = overlays.get("bb_upper", [])
-    bb_lower = overlays.get("bb_lower", [])
-    ema20 = overlays.get("ema20", [])
-    ema50 = overlays.get("ema50", [])
-    ema200 = overlays.get("ema200", [])
-    rsi = overlays.get("rsi", [])
-    macd_hist = overlays.get("macd_hist", [])
-    stoch_k = overlays.get("stoch_k", [])
-    stoch_d = overlays.get("stoch_d", [])
+    def get_overlay(name):
+        if isinstance(overlays, dict):
+            return overlays.get(name, [])
+        if isinstance(overlays, list):
+            for item in overlays:
+                if isinstance(item, dict) and item.get("name") == name:
+                    return item.get("data", [])
+        return []
+
+    bb_upper = get_overlay("bb_upper")
+    bb_lower = get_overlay("bb_lower")
+    ema20 = get_overlay("ema20")
+    ema50 = get_overlay("ema50")
+    ema200 = get_overlay("ema200")
+    rsi = get_overlay("rsi")
+    macd_hist = get_overlay("macd_hist")
+    stoch_k = get_overlay("stoch_k")
+    stoch_d = get_overlay("stoch_d")
 
     last = closes[-1]
 
