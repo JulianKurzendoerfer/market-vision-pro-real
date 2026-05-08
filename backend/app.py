@@ -149,6 +149,184 @@ def _stoch(highs, lows, closes, period=14, smooth_d=3):
         d[i] = (sum(window) / len(window)) if window else None
     return k, d
 
+
+def _calc_signal(candles, overlays, elliott):
+    if not candles or len(candles) < 20:
+        return {"score": 0, "signal": "NEUTRAL", "reasons": [], "details": {}}
+
+    closes = [c["close"] for c in candles]
+    highs = [c["high"] for c in candles]
+    lows = [c["low"] for c in candles]
+
+    score = 0
+    reasons = []
+    details = {}
+
+    bb_upper = overlays.get("bb_upper", [])
+    bb_lower = overlays.get("bb_lower", [])
+    ema20 = overlays.get("ema20", [])
+    ema50 = overlays.get("ema50", [])
+    ema200 = overlays.get("ema200", [])
+    rsi = overlays.get("rsi", [])
+    macd_hist = overlays.get("macd_hist", [])
+    stoch_k = overlays.get("stoch_k", [])
+    stoch_d = overlays.get("stoch_d", [])
+
+    last = closes[-1]
+
+    if bb_lower and len(bb_lower) >= 2:
+        bl = bb_lower[-1]
+        bl_prev = bb_lower[-2]
+        bu = bb_upper[-1] if bb_upper else None
+        if last <= bl * 1.005:
+            score += 2
+            reasons.append("Kurs an unterem Bollinger Band")
+            details["bb"] = "bullish"
+        elif lows[-1] <= bl and closes[-1] > bl:
+            score += 2
+            reasons.append("Kurs kreuzt unteres Bollinger Band nach oben")
+            details["bb"] = "bullish"
+        elif bu and last >= bu * 0.995:
+            score -= 2
+            reasons.append("Kurs an oberem Bollinger Band")
+            details["bb"] = "bearish"
+        else:
+            details["bb"] = "neutral"
+
+        if ema20 and ema50 and ema200:
+            e20 = ema20[-1]; e50 = ema50[-1]; e200 = ema200[-1]
+            if last < e20 and last < e50 and last < e200:
+                if details.get("bb") == "bullish":
+                    score += 1
+                    reasons.append("Kurs unter allen EMAs (Bollinger Bonus)")
+            details["ema_trend"] = "bullish" if last > e200 else "bearish"
+
+    if rsi and len(rsi) >= 5:
+        r = rsi[-1]
+        r_prev = rsi[-2]
+        r_prev2 = rsi[-3] if len(rsi) >= 3 else r_prev
+        details["rsi_value"] = round(r, 1)
+
+        if r_prev < 30 and r >= 30:
+            impulse = r - min(rsi[-5:])
+            if impulse >= 8:
+                score += 3
+                reasons.append(f"RSI V-Form Durchbruch über 30 (stark, +{impulse:.0f})")
+                details["rsi"] = "strong_bullish"
+            else:
+                score += 1
+                reasons.append("RSI kreuzt 30 nach oben (schwach)")
+                details["rsi"] = "weak_bullish"
+        elif r_prev > 70 and r <= 70:
+            impulse = max(rsi[-5:]) - r
+            if impulse >= 8:
+                score -= 3
+                reasons.append(f"RSI V-Form Durchbruch unter 70 (stark, -{impulse:.0f})")
+                details["rsi"] = "strong_bearish"
+            else:
+                score -= 1
+                reasons.append("RSI kreuzt 70 nach unten (schwach)")
+                details["rsi"] = "weak_bearish"
+        elif r < 30:
+            details["rsi"] = "oversold"
+        elif r > 70:
+            details["rsi"] = "overbought"
+        else:
+            details["rsi"] = "neutral"
+
+    if macd_hist and len(macd_hist) >= 4:
+        mh = [x for x in macd_hist[-5:] if x is not None]
+        if len(mh) >= 3:
+            last_mh = mh[-1]
+            prev_mh = mh[-2]
+            prev2_mh = mh[-3]
+            details["macd_hist"] = round(last_mh, 3)
+
+            if last_mh >= 0 and prev_mh < 0:
+                score += 2
+                reasons.append("MACD kreuzt 0-Linie nach oben")
+                details["macd"] = "bullish_cross"
+            elif last_mh <= 0 and prev_mh > 0:
+                score -= 2
+                reasons.append("MACD kreuzt 0-Linie nach unten")
+                details["macd"] = "bearish_cross"
+            elif last_mh < 0 and prev_mh < last_mh and prev2_mh < prev_mh:
+                score += 1
+                reasons.append("MACD Histogramm steigt (Vorbote)")
+                details["macd"] = "pre_bullish"
+            elif last_mh > 0 and prev_mh > last_mh and prev2_mh > prev_mh:
+                score -= 1
+                reasons.append("MACD Histogramm sinkt (Vorbote)")
+                details["macd"] = "pre_bearish"
+            else:
+                details["macd"] = "neutral"
+
+    if stoch_k and stoch_d and len(stoch_k) >= 2 and len(stoch_d) >= 2:
+        sk = stoch_k[-1]; sk_p = stoch_k[-2]
+        sd = stoch_d[-1]; sd_p = stoch_d[-2]
+        details["stoch_k"] = round(sk, 1)
+        details["stoch_d"] = round(sd, 1)
+
+        k_cross_up = sk_p < 20 and sk >= 20
+        d_cross_up = sd_p < 20 and sd >= 20
+        k_cross_dn = sk_p > 80 and sk <= 80
+        d_cross_dn = sd_p > 80 and sd <= 80
+
+        if k_cross_up and d_cross_up:
+            score += 3
+            reasons.append("Stochastik: beide Linien kreuzen 20 nach oben")
+            details["stoch"] = "strong_bullish"
+        elif k_cross_up or d_cross_up:
+            score += 2
+            reasons.append("Stochastik kreuzt 20 nach oben")
+            details["stoch"] = "bullish"
+        elif k_cross_dn and d_cross_dn:
+            score -= 3
+            reasons.append("Stochastik: beide Linien kreuzen 80 nach unten")
+            details["stoch"] = "strong_bearish"
+        elif k_cross_dn or d_cross_dn:
+            score -= 2
+            reasons.append("Stochastik kreuzt 80 nach unten")
+            details["stoch"] = "bearish"
+        elif sk < 20 and sd < 20:
+            details["stoch"] = "oversold"
+        elif sk > 80 and sd > 80:
+            details["stoch"] = "overbought"
+        else:
+            details["stoch"] = "neutral"
+
+    if elliott:
+        structure = elliott.get("current_structure", "")
+        direction = elliott.get("direction", "")
+        if "Welle 3" in structure and direction == "bullish":
+            score += 1
+            reasons.append("Elliott: Welle 3 bullish aktiv")
+        elif "Korrektur" in structure and score > 0:
+            score -= 1
+            reasons.append("Elliott: Korrekturphase dämpft Signal")
+        elif "Welle 2" in structure or "Welle 4" in structure:
+            if score > 0:
+                score += 1
+                reasons.append("Elliott: Korrekturwelle – Einstiegschance")
+
+    if score >= 4:
+        signal = "STARKES KAUFSIGNAL"
+    elif score >= 2:
+        signal = "KAUFSIGNAL"
+    elif score <= -4:
+        signal = "STARKES VERKAUFSSIGNAL"
+    elif score <= -2:
+        signal = "VERKAUFSSIGNAL"
+    else:
+        signal = "NEUTRAL"
+
+    return {
+        "score": score,
+        "signal": signal,
+        "reasons": reasons,
+        "details": details
+    }
+
 def _sr_levels(candles, pivot_left=6, pivot_right=6, tol_pct=0.008, max_levels=30, current_price=None, price_range_pct=0.50):
     if not candles or len(candles) < (pivot_left + pivot_right + 10):
         return []
@@ -793,7 +971,8 @@ def tv(
             ell_candles = candles[-250:] if len(candles) > 250 else candles
             pivots = _zigzag_pivots(ell_candles, deviation=0.06, min_bars=8)
             elliott = _elliott_labels(pivots, candles=ell_candles)
-            return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels, "elliott": elliott}
+            signal = _calc_signal(candles, overlays, elliott)
+            return {"symbol": symbol.upper(), "candles": candles, "overlays": overlays, "last": last, "levels": levels, "elliott": elliott, "signal": signal}
     except Exception as e:
         import traceback
         return {"ERROR": str(e), "TRACE": traceback.format_exc()}
