@@ -559,6 +559,10 @@ def _build_elliott_analysis(pivots, candles=None):
     for i, name in enumerate(["1", "2", "3", "4", "5"], 1):
         pt = best["points"][i]
         labels.append({"time": pt["time"], "price": pt["price"], "text": name})
+    wave5_time = best["points"][5]["time"]
+    post_pivots = [p for p in pivots if p["time"] > wave5_time]
+    for i, p in enumerate(post_pivots[:3]):
+        labels.append({"time": p["time"], "price": p["price"], "text": ["A", "B", "C"][i]})
     mom_score = 0.0
     if candles and len(best["points"]) >= 4:
         mom_score = _momentum_score(candles, best["points"][0], best["points"][2])
